@@ -477,23 +477,6 @@ static bool fetch_about_testament_handler(struct fetch_about_context *ctx)
 	if (fetch_about_send_callback(&msg, ctx))
 		goto fetch_about_testament_handler_aborted;
 
-
-	slen = snprintf(buffer, sizeof buffer,
-			"Built by %s (%s) from %s at revision %s on %s\n\n",
-			GECOS, USERNAME, WT_BRANCHPATH, WT_REVID, WT_COMPILEDATE);
-
-	msg.data.header_or_data.len = slen;
-	if (fetch_about_send_callback(&msg, ctx))
-		goto fetch_about_testament_handler_aborted;
-
-	slen = snprintf(buffer, sizeof buffer,
-			"Built on %s in %s\n\n",
-			WT_HOSTNAME, WT_ROOT);
-
-	msg.data.header_or_data.len = slen;
-	if (fetch_about_send_callback(&msg, ctx))
-		goto fetch_about_testament_handler_aborted;
-
 	if (WT_MODIFIED > 0) {
 		slen = snprintf(buffer, sizeof buffer,
 				"Working tree has %d modification%s\n\n",
