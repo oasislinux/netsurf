@@ -1596,7 +1596,7 @@ static bool urldb_parse_avpair(struct cookie_internal_data *c, char *n,
 				return false;
 		}
 	} else if (strcasecmp(n, "Max-Age") == 0) {
-		int temp = atoi(v);
+		long long temp = strtoll(v, NULL, 10);
 		if (temp == 0)
 			/* Special case - 0 means delete */
 			c->expires = 0;
@@ -2272,13 +2272,13 @@ static void urldb_save_cookie_paths(FILE *fp, struct path_data *parent)
 					continue;
 
 				fprintf(fp,
-					"%d\t%s\t%d\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t"
+					"%d\t%s\t%d\t%s\t%d\t%d\t%d\t%lld\t%lld\t%d\t"
 					"%s\t%s\t%d\t%s\t%s\t%s\n",
 					c->version, c->domain,
 					c->domain_from_set, c->path,
 					c->path_from_set, c->secure,
 					c->http_only,
-					(int)c->expires, (int)c->last_used,
+					(long long)c->expires, (long long)c->last_used,
 					c->no_destroy, c->name, c->value,
 					c->value_was_quoted,
 					p->scheme ? lwc_string_data(p->scheme) :
@@ -3862,8 +3862,8 @@ void urldb_load_cookies(const char *filename)
 		} else {
 			http_only = 0;
 		}
-		SKIP_T; expires = (time_t)atoi(p); FIND_T;
-		SKIP_T; last_used = (time_t)atoi(p); FIND_T;
+		SKIP_T; expires = (time_t)strtoll(p, NULL, 10); FIND_T;
+		SKIP_T; last_used = (time_t)strtoll(p, NULL, 10); FIND_T;
 		SKIP_T; no_destroy = atoi(p); FIND_T;
 		SKIP_T; name = p; FIND_T;
 		SKIP_T; value = p; FIND_T;
