@@ -18,6 +18,7 @@
 
 #include <stdbool.h>
 #include <pixman.h>
+#include <math.h>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -41,6 +42,7 @@
 
 #include "tiny/render.h"
 
+#define LENGTH(a) (sizeof(a) / sizeof((a)[0]))
 #define BOLD_WEIGHT 700
 #define PIXMAN_COLOR(c) {\
 	.red = ((c) & 0xff) * 0x101,\
@@ -597,6 +599,33 @@ struct gui_bitmap_table *tiny_bitmap_table = &bitmap_table;
 
 /* plotters */
 static bool
+plotoutline(FT_Outline *outline, colour c)
+{
+	pixman_color_t color = PIXMAN_COLOR(c);
+	pixman_image_t *image, *solid;
+	int x, y, w, h;
+
+	if (outlineimage(outline, &x, &y, &image) != NSERROR_OK)
+		goto err0;
+	w = pixman_image_get_width(image);
+	h = pixman_image_get_height(image);
+
+	solid = pixman_image_create_solid_fill(&color);
+	if (!solid)
+		goto err1;
+	pixman_image_composite32(PIXMAN_OP_OVER, solid, image, target, 0, 0, 0, 0, -x, -y, w, h);
+	pixman_image_unref(image);
+	pixman_image_unref(solid);
+
+	return true;
+
+err1:
+	pixman_image_unref(image);
+err0:
+	return false;
+}
+
+static bool
 plot_clip(const struct rect *clip)
 {
 	pixman_region32_t region;
@@ -622,10 +651,39 @@ plot_arc(int x, int y, int radius, int angle1, int angle2, const plot_style_t *s
 }
 
 static bool
-plot_disc(int x, int y, int radius, const plot_style_t *style)
+plot_disc(int x, int y, int r, const plot_style_t *style)
 {
-	LOG("plot_disc");
-	return false;
+	x <<= 6;
+	y <<= 6;
+	r <<= 6;
+
+	FT_Outline outline;
+	FT_Pos c = (double)r * 4 * (sqrt(2) - 1) / 3;
+	FT_Vector points[] = {
+		{x - r, -y},
+		{x - r, -(y - c)},
+		{x - c, -(y - r)},
+		{x, -(y - r)},
+		{x + c, -(y - r)},
+		{x + r, -(y - c)},
+		{x + r, -y},
+		{x + r, -(y + c)},
+		{x + c, -(y + r)},
+		{x, -(y + r)},
+		{x - c, -(y + r)},
+		{x - r, -(y + c)},
+	};
+	char tags[] = {1, 2, 2, 1, 2, 2, 1, 2, 2, 1, 2, 2};
+	short contour = LENGTH(points) - 1;
+
+	outline.n_contours = 1;
+	outline.n_points = LENGTH(points);
+	outline.contours = &contour;
+	outline.points = points;
+	outline.tags = tags;
+	outline.flags = FT_OUTLINE_OWNER;
+
+	return plotoutline(&outline, style->fill_colour);
 }
 
 static bool
@@ -675,11 +733,8 @@ plot_rectangle(int x0, int y0, int x1, int y1, const plot_style_t *style)
 static bool
 plot_polygon(const int *p, unsigned int n, const plot_style_t *style)
 {
-	pixman_color_t color = PIXMAN_COLOR(style->fill_colour);
-	pixman_image_t *polygon, *solid;
 	FT_Outline outline;
 	FT_Vector *v;
-	int w, h, x, y;
 	short contour = n - 1;
 
 	outline.n_contours = 1;
@@ -699,25 +754,14 @@ plot_polygon(const int *p, unsigned int n, const plot_style_t *style)
 		v->y = -p[1] << 6;
 	}
 
-	if (outlineimage(&outline, &x, &y, &polygon) != NSERROR_OK)
+	if (!plotoutline(&outline, style->fill_colour))
 		goto err2;
-	w = pixman_image_get_width(polygon);
-	h = pixman_image_get_height(polygon);
 
 	free(outline.tags);
 	free(outline.points);
 
-	solid = pixman_image_create_solid_fill(&color);
-	if (!solid)
-		goto err3;
-	pixman_image_composite32(PIXMAN_OP_OVER, solid, polygon, target, 0, 0, 0, 0, -x, -y, w, h);
-	pixman_image_unref(polygon);
-	pixman_image_unref(solid);
-
 	return true;
 
-err3:
-	pixman_image_unref(polygon);
 err2:
 	free(outline.tags);
 err1:
