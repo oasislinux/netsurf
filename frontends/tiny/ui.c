@@ -439,19 +439,6 @@ gui_window_button(struct gui_window *g, int button, bool pressed)
 			break;
 		case 3:
 			// TODO: Implement context menu.
-			{
-				struct browser_window_features features;
-				const char *link;
-				const struct rect *r;
-
-				r = &g->ui[UI_CONTENT].r;
-				browser_window_get_features(g->bw, g->ptr.x - (r->x0 - g->scroll.x), g->ptr.y - (r->y0 - g->scroll.y), &features);
-				if (features.link) {
-					link = nsurl_access(features.link);
-					printf("copy %s\n", link);
-					tiny_clipboard_table->set(link, strlen(link), NULL, 0);
-				}
-			}
 			return;
 		default:
 			return;
@@ -777,9 +764,6 @@ content_key(struct gui_window *g, struct element *e, uint32_t key)
 	switch (key) {
 	case 'f':
 		// TODO: implement search
-		if (platform_window_get_mods(g->platform) & BROWSER_MOUSE_MOD_2) {
-			browser_window_search(g->bw, NULL, SEARCH_FLAG_SHOWALL, "suck");
-		}
 		break;
 	}
 	browser_window_key_press(g->bw, key);
