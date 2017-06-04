@@ -716,7 +716,7 @@ plot_line(int x0, int y0, int x1, int y1, const plot_style_t *style)
 		box.y2 += (style->stroke_width + 1) / 2;
 	} else {
 		LOG("plot diagonal line not implemented");
-		return false;
+		return true;
 	}
 
 	return pixman_image_fill_boxes(PIXMAN_OP_SRC, target, &fill_color, 1, &box);
