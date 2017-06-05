@@ -806,25 +806,44 @@ plot_path(const float *p, unsigned int n, colour fill, float width, colour c, co
 }
 
 static bool
-plot_bitmap(int x, int y, int width, int height, struct bitmap *bitmap, colour bg, bitmap_flags_t flags)
+plot_bitmap(int x, int y, int w, int h, struct bitmap *bitmap, colour bg, bitmap_flags_t flags)
 {
 	struct pixman_transform transform;
 	pixman_image_t *image = (void *)bitmap;
 	pixman_fixed_t sx, sy;
+	int srcx = 0, srcy = 0;
 
-	if (width != pixman_image_get_width(image) || height != pixman_image_get_height(image)) {
-		sx = pixman_int_to_fixed(pixman_image_get_width(image)) / width;
-		sy = pixman_int_to_fixed(pixman_image_get_height(image)) / height;
+	/* scaling */
+	sx = pixman_int_to_fixed(pixman_image_get_width(image)) / w;
+	sy = pixman_int_to_fixed(pixman_image_get_height(image)) / h;
+	if (sx != pixman_fixed_1 || sy != pixman_fixed_1) {
 		pixman_transform_init_scale(&transform, sx, sy);
 		pixman_image_set_transform(image, &transform);
 		pixman_image_set_filter(image, PIXMAN_FILTER_GOOD, NULL, 0);
 	} else {
 		pixman_image_set_transform(image, NULL);
 	}
+
+	/* repeat */
+	if (flags & (BITMAPF_REPEAT_X | BITMAPF_REPEAT_Y))
+		pixman_image_set_repeat(image, PIXMAN_REPEAT_NORMAL);
+	else
+		pixman_image_set_repeat(image, PIXMAN_REPEAT_NONE);
+	if (flags & BITMAPF_REPEAT_X) {
+		srcx = w - (x - curclip.x0) % w;
+		x = curclip.x0;
+		w = curclip.x1 - curclip.x0;
+	}
+	if (flags & BITMAPF_REPEAT_Y) {
+		srcy = h - (y - curclip.y0) % h;
+		y = curclip.y0;
+		h = curclip.y1 - curclip.y0;
+	}
+
         /* netsurf gives us images with non-premultiplied alpha, so set image as
 	 * the mask here so that the bitmap alpha component gets multiplied with
 	 * the bitmap color components. */
-	pixman_image_composite32(PIXMAN_OP_OVER, image, image, target, 0, 0, 0, 0, x, y, width, height);
+	pixman_image_composite32(PIXMAN_OP_OVER, image, image, target, srcx, srcy, srcx, srcy, x, y, w, h);
 	return true;
 }
 
