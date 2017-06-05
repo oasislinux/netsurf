@@ -689,14 +689,13 @@ plot_disc(int x, int y, int r, const plot_style_t *style)
 static bool
 plot_line(int x0, int y0, int x1, int y1, const plot_style_t *style)
 {
+	int sw = max(style->stroke_width, 1);
 	pixman_color_t fill_color = PIXMAN_COLOR(style->stroke_colour);
 	pixman_box32_t box = {
 		min(x0, x1), min(y0, y1),
 		max(x0, x1), max(y0, y1),
 	};
 
-	if (!style->stroke_width)
-		return true;
 	if (box.x1 < curclip.x0)
 		box.x1 = min(box.x2, curclip.x0);
 	if (box.y1 < curclip.y0)
@@ -709,11 +708,11 @@ plot_line(int x0, int y0, int x1, int y1, const plot_style_t *style)
 		return true;
 
 	if (x0 == x1) {
-		box.x1 -= style->stroke_width / 2;
-		box.x2 += (style->stroke_width + 1) / 2;
+		box.x1 -= sw / 2;
+		box.x2 += (sw + 1) / 2;
 	} else if (y0 == y1) {
-		box.y1 -= style->stroke_width / 2;
-		box.y2 += (style->stroke_width + 1) / 2;
+		box.y1 -= sw / 2;
+		box.y2 += (sw + 1) / 2;
 	} else {
 		LOG("plot diagonal line not implemented");
 		return true;
