@@ -690,35 +690,64 @@ static bool
 plot_line(int x0, int y0, int x1, int y1, const plot_style_t *style)
 {
 	int sw = max(style->stroke_width, 1);
-	pixman_color_t fill_color = PIXMAN_COLOR(style->stroke_colour);
-	pixman_box32_t box = {
-		min(x0, x1), min(y0, y1),
-		max(x0, x1), max(y0, y1),
-	};
 
-	if (box.x1 < curclip.x0)
-		box.x1 = min(box.x2, curclip.x0);
-	if (box.y1 < curclip.y0)
-		box.y1 = min(box.y2, curclip.y0);
-	if (curclip.x1 < box.x2)
-		box.x2 = max(box.x1, curclip.x1);
-	if (curclip.y1 < box.y2)
-		box.y2 = max(box.y1, curclip.y1);
-	if (box.x1 == box.x2 && box.y1 == box.y2)
-		return true;
+	// TODO: handled non-solid lines
 
-	if (x0 == x1) {
-		box.x1 -= sw / 2;
-		box.x2 += (sw + 1) / 2;
-	} else if (y0 == y1) {
-		box.y1 -= sw / 2;
-		box.y2 += (sw + 1) / 2;
+	if (x0 == x1 || y0 == y1) {
+		pixman_color_t fill_color = PIXMAN_COLOR(style->stroke_colour);
+		pixman_box32_t box = {
+			min(x0, x1), min(y0, y1),
+			max(x0, x1), max(y0, y1),
+		};
+
+		if (box.x1 < curclip.x0)
+			box.x1 = min(box.x2, curclip.x0);
+		if (box.y1 < curclip.y0)
+			box.y1 = min(box.y2, curclip.y0);
+		if (curclip.x1 < box.x2)
+			box.x2 = max(box.x1, curclip.x1);
+		if (curclip.y1 < box.y2)
+			box.y2 = max(box.y1, curclip.y1);
+		if (box.x1 == box.x2 && box.y1 == box.y2)
+			return true;
+
+		if (x0 == x1) {
+			box.x1 -= sw / 2;
+			box.x2 += (sw + 1) / 2;
+		} else if (y0 == y1) {
+			box.y1 -= sw / 2;
+			box.y2 += (sw + 1) / 2;
+		}
+
+		return pixman_image_fill_boxes(PIXMAN_OP_SRC, target, &fill_color, 1, &box);
 	} else {
-		LOG("plot diagonal line not implemented");
-		return true;
-	}
+		x0 <<= 6;
+		y0 <<= 6;
+		x1 <<= 6;
+		y1 <<= 6;
 
-	return pixman_image_fill_boxes(PIXMAN_OP_SRC, target, &fill_color, 1, &box);
+		double theta = atan((double)-(y1 - y0) / (x1 - x0));
+		FT_Pos ex = sin(theta) * 32. * sw;
+		FT_Pos ey = cos(theta) * 32. * sw;
+		FT_Vector points[] = {
+			{x0 - ex, -(y0 - ey)},
+			{x1 - ex, -(y1 - ey)},
+			{x1 + ex, -(y1 + ey)},
+			{x0 + ex, -(y0 + ey)},
+		};
+		char tags[] = {1, 1, 1, 1};
+		short contour = LENGTH(points) - 1;
+		FT_Outline outline = {
+			.n_contours = 1,
+			.n_points = LENGTH(points),
+			.contours = &contour,
+			.points = points,
+			.tags = tags,
+			.flags = FT_OUTLINE_OWNER,
+		};
+
+		return plotoutline(&outline, style->stroke_colour);
+	}
 }
 
 static bool
