@@ -140,6 +140,22 @@ rectcontains(const struct rect *r, int x, int y) {
 	return r->x0 <= x && x < r->x1 && r->y0 <= y && y < r->y1;
 }
 
+static bool
+trimrect(struct rect *r1, const struct rect *r2)
+{
+	if (r1->x0 < r2->x0)
+		r1->x0 = min(r1->x1, r2->x0);
+	if (r1->y0 < r2->y0)
+		r1->y0 = min(r1->y1, r2->y0);
+
+	if (r2->x1 < r1->x1)
+		r1->x1 = max(r1->x0, r2->x1);
+	if (r2->y1 < r1->y1)
+		r1->y1 = max(r1->y0, r2->y1);
+
+	return r1->x0 < r1->x1 && r1->y0 < r1->y1;
+}
+
 static void
 removecaret(struct gui_window *g)
 {
@@ -196,353 +212,6 @@ navigate(struct gui_window *g)
 	browser_window_navigate(g->bw, url, NULL, BW_NAVIGATE_HISTORY, NULL, NULL, NULL);
 	textarea_set_caret(g->url, -1);
 	g->kbd.focus = UI_CONTENT;
-}
-
-void
-gui_window_reformat(struct gui_window *g, int w, int h)
-{
-	const struct rect *r;
-
-	LOG("reformat %d, %d\n", w, h);
-
-	g->width = w;
-	g->height = h;
-
-	g->ui[UI_BUTTONS].r = (struct rect){0, 0, TOOLBAR_SIZE * 4, TOOLBAR_SIZE};
-	g->ui[UI_URL].r = (struct rect){TOOLBAR_SIZE * 4, 0, w, TOOLBAR_SIZE};
-	g->ui[UI_CONTENT].r = (struct rect){0, TOOLBAR_SIZE, w, h - STATUS_HEIGHT};
-	g->ui[UI_STATUS].r = (struct rect){0, h - STATUS_HEIGHT, w, h};
-	g->ui[UI_HSCROLL].hidden = true;
-	g->ui[UI_VSCROLL].hidden = true;
-
-	r = &g->ui[UI_URL].r;
-	textarea_set_dimensions(g->url, rectwidth(r), rectheight(r));
-
-	r = &g->ui[UI_CONTENT].r;
-	browser_window_reformat(g->bw, false, rectwidth(r), rectheight(r));
-}
-
-static bool
-trimrect(struct rect *r1, const struct rect *r2)
-{
-	if (r1->x0 < r2->x0)
-		r1->x0 = min(r1->x1, r2->x0);
-	if (r1->y0 < r2->y0)
-		r1->y0 = min(r1->y1, r2->y0);
-
-	if (r2->x1 < r1->x1)
-		r1->x1 = max(r1->x0, r2->x1);
-	if (r2->y1 < r1->y1)
-		r1->y1 = max(r1->y0, r2->y1);
-
-	return r1->x0 < r1->x1 && r1->y0 < r1->y1;
-}
-
-void
-gui_window_redraw(struct gui_window *g, const struct rect *clip, const struct redraw_context *ctx)
-{
-	struct rect subclip;
-	plot_style_t style;
-	int i;
-	struct element *e;
-
-	//printf("clip { %d, %d; %d, %d }\n", clip->x0, clip->y0, clip->x1, clip->y1);
-
-	for (i = 0; i < UI_NUMELEMENTS; ++i) {
-		e = &g->ui[i];
-		if (e->hidden)
-			continue;
-		subclip = e->r;
-		if (trimrect(&subclip, clip))
-			e->impl->redraw(g, e, &subclip, ctx);
-	}
-
-	if (g->caret.h) {
-		style.stroke_type = PLOT_OP_TYPE_SOLID;
-		style.stroke_width = 1;
-		style.stroke_colour = CARET_STROKE;
-		ctx->plot->clip(NULL);
-		ctx->plot->line(g->caret.x, g->caret.y, g->caret.x, g->caret.y + g->caret.h, &style);
-	}
-
-}
-
-#if 0
-static void
-printmouse(browser_mouse_state mouse, int x, int y)
-{
-	const char *sep = "";
-	printf("%4d, %4d ", x, y);
-#define PRINT(x) \
-	if (mouse & BROWSER_MOUSE_ ## x) { \
-		printf("%s" #x, sep); \
-		sep = "|"; \
-	}
-	PRINT(PRESS_1)
-	PRINT(PRESS_2)
-	PRINT(CLICK_1)
-	PRINT(CLICK_2)
-	PRINT(DOUBLE_CLICK)
-	PRINT(TRIPLE_CLICK)
-	PRINT(DRAG_1)
-	PRINT(DRAG_2)
-	PRINT(DRAG_ON)
-	PRINT(HOLDING_1)
-	PRINT(HOLDING_2)
-	PRINT(MOD_1)
-	PRINT(MOD_2)
-	PRINT(MOD_3)
-	putchar('\n');
-}
-#endif
-
-static void
-mousedispatch(struct gui_window *g, browser_mouse_state state)
-{
-	int x, y;
-	struct element *e;
-
-	e = &g->ui[g->ptr.focus];
-	x = g->ptr.x;
-	y = g->ptr.y;
-
-	if (x < e->r.x0)
-		x = e->r.x0;
-	if (y < e->r.y0)
-		y = e->r.y0;
-	if (e->r.x1 < x)
-		x = e->r.x1;
-	if (e->r.y1 < y)
-		y = e->r.y1;
-
-	if (e->impl->mouse)
-		e->impl->mouse(g, e, state, x - e->r.x0, y - e->r.y0);
-}
-
-static void
-mousefocus(struct gui_window *g, bool click)
-{
-	int i;
-	struct element *e;
-
-	if (g->ptr.state & (BROWSER_MOUSE_PRESS_1 | BROWSER_MOUSE_PRESS_2 | BROWSER_MOUSE_DRAG_ON))
-		return;
-
-	for (i = 0; i < UI_NUMELEMENTS; ++i) {
-		e = &g->ui[i];
-		if (e->hidden)
-			continue;
-		if (rectcontains(&e->r, g->ptr.x, g->ptr.y)) {
-			// TODO: Some sort of focus change mechanism?
-			if (g->ptr.focus != i) {
-				g->ptr.focus = i;
-				switch (i) {
-				case UI_URL:
-					platform_window_set_pointer(g->platform, GUI_POINTER_CARET);
-					break;
-				case UI_BUTTONS:
-				case UI_HSCROLL:
-				case UI_VSCROLL:
-					platform_window_set_pointer(g->platform, GUI_POINTER_DEFAULT);
-					platform_window_set_pointer(g->platform, GUI_POINTER_DEFAULT);
-					break;
-				}
-			}
-			if (click && g->kbd.focus != i && i != UI_HSCROLL && i != UI_VSCROLL) {
-				switch (g->kbd.focus) {
-				case UI_URL:
-					textarea_clear_selection(g->url);
-					textarea_set_caret(g->url, -1);
-					break;
-				case UI_CONTENT:
-					browser_window_remove_caret(g->bw, false);
-					break;
-				}
-				g->kbd.focus = i;
-			}
-		}
-	}
-}
-
-void
-gui_window_button(struct gui_window *g, int button, bool pressed)
-{
-	if (pressed) {
-		mousefocus(g, true);
-		switch (button) {
-		case 1:
-			g->ptr.state |= BROWSER_MOUSE_PRESS_1;
-			mousedispatch(g, g->ptr.state);
-			break;
-		case 2:
-			g->ptr.state |= BROWSER_MOUSE_PRESS_2;
-			break;
-		default:
-			return;
-		}
-		mousedispatch(g, g->ptr.state);
-	} else {
-		switch (button) {
-		case 1:
-			// TODO: Can this be simpler?
-			g->ptr.state &= ~(BROWSER_MOUSE_PRESS_1 | BROWSER_MOUSE_HOLDING_1);
-			if (!(g->ptr.state & BROWSER_MOUSE_HOLDING_2))
-				g->ptr.state &= ~BROWSER_MOUSE_DRAG_ON;
-			mousedispatch(g, g->ptr.state | BROWSER_MOUSE_CLICK_1);
-			mousedispatch(g, g->ptr.state);
-			break;
-		case 2:
-			g->ptr.state &= ~(BROWSER_MOUSE_PRESS_2 | BROWSER_MOUSE_HOLDING_2);
-			if (!(g->ptr.state & BROWSER_MOUSE_HOLDING_1))
-				g->ptr.state &= ~BROWSER_MOUSE_DRAG_ON;
-			mousedispatch(g, g->ptr.state | BROWSER_MOUSE_CLICK_2);
-			mousedispatch(g, g->ptr.state);
-			break;
-		case 3:
-			// TODO: Implement context menu.
-			return;
-		default:
-			return;
-		}
-		mousefocus(g, false);
-	}
-}
-
-void
-gui_window_motion(struct gui_window *g, int x, int y)
-{
-	if (x == g->ptr.x && y == g->ptr.y)
-		return;
-	g->ptr.x = x;
-	g->ptr.y = y;
-	if (g->ptr.state & BROWSER_MOUSE_PRESS_1) {
-		g->ptr.state &= ~BROWSER_MOUSE_PRESS_1;
-		mousedispatch(g, g->ptr.state | BROWSER_MOUSE_DRAG_1);
-		g->ptr.state |= BROWSER_MOUSE_HOLDING_1 | BROWSER_MOUSE_DRAG_ON;
-	}
-	if (g->ptr.state & BROWSER_MOUSE_PRESS_2) {
-		g->ptr.state &= ~BROWSER_MOUSE_PRESS_2;
-		mousedispatch(g, g->ptr.state | BROWSER_MOUSE_DRAG_2);
-		g->ptr.state |= BROWSER_MOUSE_HOLDING_2 | BROWSER_MOUSE_DRAG_ON;
-	}
-	mousefocus(g, false);
-	mousedispatch(g, g->ptr.state);
-}
-
-void
-gui_window_key(struct gui_window *g, xkb_keysym_t sym, bool pressed)
-{
-	uint32_t key = 0;
-	browser_mouse_state mods;
-	struct element *e;
-
-	if (!pressed)
-		return;
-
-	mods = platform_window_get_mods(g->platform);
-
-	if (sym == XKB_KEY_l && mods & BROWSER_MOUSE_MOD_2) {
-		g->kbd.focus = UI_URL;
-		textarea_keypress(g->url, NS_KEY_SELECT_ALL);
-		return;
-	}
-
-	switch (sym) {
-	case XKB_KEY_Delete:
-		key = NS_KEY_DELETE_RIGHT;
-		break;
-	case XKB_KEY_Page_Up:
-		key = NS_KEY_PAGE_UP;
-		break;
-	case XKB_KEY_Page_Down:
-		key = NS_KEY_PAGE_UP;
-		break;
-	case XKB_KEY_Right:
-		if (mods & BROWSER_MOUSE_MOD_2)
-			key = NS_KEY_LINE_END;
-		else if (mods & BROWSER_MOUSE_MOD_1)
-			key = NS_KEY_WORD_RIGHT;
-		else
-			key = NS_KEY_RIGHT;
-		break;
-	case XKB_KEY_Left:
-		if (mods & BROWSER_MOUSE_MOD_2)
-			key = NS_KEY_LINE_START;
-		else if (mods & BROWSER_MOUSE_MOD_1)
-			key = NS_KEY_WORD_LEFT;
-		else
-			key = NS_KEY_LEFT;
-		break;
-	case XKB_KEY_Up:
-		key = NS_KEY_UP;
-		break;
-	case XKB_KEY_Down:
-		key = NS_KEY_DOWN;
-		break;
-	default:
-		if (mods & BROWSER_MOUSE_MOD_2) {
-			switch (sym) {
-			case XKB_KEY_a:
-				key = NS_KEY_SELECT_ALL;
-				break;
-			case XKB_KEY_c:
-				key = NS_KEY_COPY_SELECTION;
-				break;
-			case XKB_KEY_u:
-				key = NS_KEY_DELETE_LINE;
-				break;
-			case XKB_KEY_v:
-				key = NS_KEY_PASTE;
-				break;
-			case XKB_KEY_x:
-				key = NS_KEY_CUT_SELECTION;
-				break;
-			case XKB_KEY_y:
-				key = NS_KEY_REDO;
-				break;
-			case XKB_KEY_z:
-				key = mods & BROWSER_MOUSE_MOD_1 ? NS_KEY_REDO : NS_KEY_UNDO;
-				break;
-			}
-		}
-		if (key == 0)
-			key = xkb_keysym_to_utf32(sym);
-	}
-
-	e = &g->ui[g->kbd.focus];
-	if (e->impl->key)
-		e->impl->key(g, e, key);
-}
-
-void
-gui_window_axis(struct gui_window *g, bool vert, int amount)
-{
-	struct element *e;
-	struct scrollbar *s;
-	int x, y, dx, dy;
-
-	if (g->ptr.focus != UI_CONTENT)
-		return;
-
-	e = &g->ui[UI_CONTENT];
-	amount *= 8;
-	x = g->ptr.x - e->r.x0;
-	y = g->ptr.y - e->r.y0;
-
-	if (vert) {
-		s = g->scroll.v;
-		dx = 0;
-		dy = amount;
-	} else {
-		s = g->scroll.h;
-		dx = amount;
-		dy = 0;
-	}
-	if (browser_window_scroll_at_point(g->bw, x, y, dx, dy))
-		return;
-
-	if (scrollbar_scroll(s, amount))
-		platform_window_update(g->platform, &g->ui[vert ? UI_VSCROLL : UI_HSCROLL].r);
 }
 
 /**** buttons ****/
@@ -1134,6 +803,338 @@ static struct gui_window_table window_table = {
 };
 
 struct gui_window_table *tiny_window_table = &window_table;
+
+/**** gui_window internal interface ****/
+void
+gui_window_reformat(struct gui_window *g, int w, int h)
+{
+	const struct rect *r;
+
+	LOG("reformat %d, %d\n", w, h);
+
+	g->width = w;
+	g->height = h;
+
+	g->ui[UI_BUTTONS].r = (struct rect){0, 0, TOOLBAR_SIZE * 4, TOOLBAR_SIZE};
+	g->ui[UI_URL].r = (struct rect){TOOLBAR_SIZE * 4, 0, w, TOOLBAR_SIZE};
+	g->ui[UI_CONTENT].r = (struct rect){0, TOOLBAR_SIZE, w, h - STATUS_HEIGHT};
+	g->ui[UI_STATUS].r = (struct rect){0, h - STATUS_HEIGHT, w, h};
+	g->ui[UI_HSCROLL].hidden = true;
+	g->ui[UI_VSCROLL].hidden = true;
+
+	r = &g->ui[UI_URL].r;
+	textarea_set_dimensions(g->url, rectwidth(r), rectheight(r));
+
+	r = &g->ui[UI_CONTENT].r;
+	browser_window_reformat(g->bw, false, rectwidth(r), rectheight(r));
+}
+
+void
+gui_window_redraw(struct gui_window *g, const struct rect *clip, const struct redraw_context *ctx)
+{
+	struct rect subclip;
+	plot_style_t style;
+	int i;
+	struct element *e;
+
+	//printf("clip { %d, %d; %d, %d }\n", clip->x0, clip->y0, clip->x1, clip->y1);
+
+	for (i = 0; i < UI_NUMELEMENTS; ++i) {
+		e = &g->ui[i];
+		if (e->hidden)
+			continue;
+		subclip = e->r;
+		if (trimrect(&subclip, clip))
+			e->impl->redraw(g, e, &subclip, ctx);
+	}
+
+	if (g->caret.h) {
+		style.stroke_type = PLOT_OP_TYPE_SOLID;
+		style.stroke_width = 1;
+		style.stroke_colour = CARET_STROKE;
+		ctx->plot->clip(NULL);
+		ctx->plot->line(g->caret.x, g->caret.y, g->caret.x, g->caret.y + g->caret.h, &style);
+	}
+
+}
+
+#if 0
+static void
+printmouse(browser_mouse_state mouse, int x, int y)
+{
+	const char *sep = "";
+	printf("%4d, %4d ", x, y);
+#define PRINT(x) \
+	if (mouse & BROWSER_MOUSE_ ## x) { \
+		printf("%s" #x, sep); \
+		sep = "|"; \
+	}
+	PRINT(PRESS_1)
+	PRINT(PRESS_2)
+	PRINT(CLICK_1)
+	PRINT(CLICK_2)
+	PRINT(DOUBLE_CLICK)
+	PRINT(TRIPLE_CLICK)
+	PRINT(DRAG_1)
+	PRINT(DRAG_2)
+	PRINT(DRAG_ON)
+	PRINT(HOLDING_1)
+	PRINT(HOLDING_2)
+	PRINT(MOD_1)
+	PRINT(MOD_2)
+	PRINT(MOD_3)
+	putchar('\n');
+}
+#endif
+
+static void
+mousedispatch(struct gui_window *g, browser_mouse_state state)
+{
+	int x, y;
+	struct element *e;
+
+	e = &g->ui[g->ptr.focus];
+	x = g->ptr.x;
+	y = g->ptr.y;
+
+	if (x < e->r.x0)
+		x = e->r.x0;
+	if (y < e->r.y0)
+		y = e->r.y0;
+	if (e->r.x1 < x)
+		x = e->r.x1;
+	if (e->r.y1 < y)
+		y = e->r.y1;
+
+	if (e->impl->mouse)
+		e->impl->mouse(g, e, state, x - e->r.x0, y - e->r.y0);
+}
+
+static void
+mousefocus(struct gui_window *g, bool click)
+{
+	int i;
+	struct element *e;
+
+	if (g->ptr.state & (BROWSER_MOUSE_PRESS_1 | BROWSER_MOUSE_PRESS_2 | BROWSER_MOUSE_DRAG_ON))
+		return;
+
+	for (i = 0; i < UI_NUMELEMENTS; ++i) {
+		e = &g->ui[i];
+		if (e->hidden)
+			continue;
+		if (rectcontains(&e->r, g->ptr.x, g->ptr.y)) {
+			// TODO: Some sort of focus change mechanism?
+			if (g->ptr.focus != i) {
+				g->ptr.focus = i;
+				switch (i) {
+				case UI_URL:
+					platform_window_set_pointer(g->platform, GUI_POINTER_CARET);
+					break;
+				case UI_BUTTONS:
+				case UI_HSCROLL:
+				case UI_VSCROLL:
+					platform_window_set_pointer(g->platform, GUI_POINTER_DEFAULT);
+					platform_window_set_pointer(g->platform, GUI_POINTER_DEFAULT);
+					break;
+				}
+			}
+			if (click && g->kbd.focus != i && i != UI_HSCROLL && i != UI_VSCROLL) {
+				switch (g->kbd.focus) {
+				case UI_URL:
+					textarea_clear_selection(g->url);
+					textarea_set_caret(g->url, -1);
+					break;
+				case UI_CONTENT:
+					browser_window_remove_caret(g->bw, false);
+					break;
+				}
+				g->kbd.focus = i;
+			}
+		}
+	}
+}
+
+void
+gui_window_button(struct gui_window *g, int button, bool pressed)
+{
+	if (pressed) {
+		mousefocus(g, true);
+		switch (button) {
+		case 1:
+			g->ptr.state |= BROWSER_MOUSE_PRESS_1;
+			mousedispatch(g, g->ptr.state);
+			break;
+		case 2:
+			g->ptr.state |= BROWSER_MOUSE_PRESS_2;
+			break;
+		default:
+			return;
+		}
+		mousedispatch(g, g->ptr.state);
+	} else {
+		switch (button) {
+		case 1:
+			// TODO: Can this be simpler?
+			g->ptr.state &= ~(BROWSER_MOUSE_PRESS_1 | BROWSER_MOUSE_HOLDING_1);
+			if (!(g->ptr.state & BROWSER_MOUSE_HOLDING_2))
+				g->ptr.state &= ~BROWSER_MOUSE_DRAG_ON;
+			mousedispatch(g, g->ptr.state | BROWSER_MOUSE_CLICK_1);
+			mousedispatch(g, g->ptr.state);
+			break;
+		case 2:
+			g->ptr.state &= ~(BROWSER_MOUSE_PRESS_2 | BROWSER_MOUSE_HOLDING_2);
+			if (!(g->ptr.state & BROWSER_MOUSE_HOLDING_1))
+				g->ptr.state &= ~BROWSER_MOUSE_DRAG_ON;
+			mousedispatch(g, g->ptr.state | BROWSER_MOUSE_CLICK_2);
+			mousedispatch(g, g->ptr.state);
+			break;
+		case 3:
+			// TODO: Implement context menu.
+			return;
+		default:
+			return;
+		}
+		mousefocus(g, false);
+	}
+}
+
+void
+gui_window_motion(struct gui_window *g, int x, int y)
+{
+	if (x == g->ptr.x && y == g->ptr.y)
+		return;
+	g->ptr.x = x;
+	g->ptr.y = y;
+	if (g->ptr.state & BROWSER_MOUSE_PRESS_1) {
+		g->ptr.state &= ~BROWSER_MOUSE_PRESS_1;
+		mousedispatch(g, g->ptr.state | BROWSER_MOUSE_DRAG_1);
+		g->ptr.state |= BROWSER_MOUSE_HOLDING_1 | BROWSER_MOUSE_DRAG_ON;
+	}
+	if (g->ptr.state & BROWSER_MOUSE_PRESS_2) {
+		g->ptr.state &= ~BROWSER_MOUSE_PRESS_2;
+		mousedispatch(g, g->ptr.state | BROWSER_MOUSE_DRAG_2);
+		g->ptr.state |= BROWSER_MOUSE_HOLDING_2 | BROWSER_MOUSE_DRAG_ON;
+	}
+	mousefocus(g, false);
+	mousedispatch(g, g->ptr.state);
+}
+
+void
+gui_window_key(struct gui_window *g, xkb_keysym_t sym, bool pressed)
+{
+	uint32_t key = 0;
+	browser_mouse_state mods;
+	struct element *e;
+
+	if (!pressed)
+		return;
+
+	mods = platform_window_get_mods(g->platform);
+
+	if (sym == XKB_KEY_l && mods & BROWSER_MOUSE_MOD_2) {
+		g->kbd.focus = UI_URL;
+		textarea_keypress(g->url, NS_KEY_SELECT_ALL);
+		return;
+	}
+
+	switch (sym) {
+	case XKB_KEY_Delete:
+		key = NS_KEY_DELETE_RIGHT;
+		break;
+	case XKB_KEY_Page_Up:
+		key = NS_KEY_PAGE_UP;
+		break;
+	case XKB_KEY_Page_Down:
+		key = NS_KEY_PAGE_UP;
+		break;
+	case XKB_KEY_Right:
+		if (mods & BROWSER_MOUSE_MOD_2)
+			key = NS_KEY_LINE_END;
+		else if (mods & BROWSER_MOUSE_MOD_1)
+			key = NS_KEY_WORD_RIGHT;
+		else
+			key = NS_KEY_RIGHT;
+		break;
+	case XKB_KEY_Left:
+		if (mods & BROWSER_MOUSE_MOD_2)
+			key = NS_KEY_LINE_START;
+		else if (mods & BROWSER_MOUSE_MOD_1)
+			key = NS_KEY_WORD_LEFT;
+		else
+			key = NS_KEY_LEFT;
+		break;
+	case XKB_KEY_Up:
+		key = NS_KEY_UP;
+		break;
+	case XKB_KEY_Down:
+		key = NS_KEY_DOWN;
+		break;
+	default:
+		if (mods & BROWSER_MOUSE_MOD_2) {
+			switch (sym) {
+			case XKB_KEY_a:
+				key = NS_KEY_SELECT_ALL;
+				break;
+			case XKB_KEY_c:
+				key = NS_KEY_COPY_SELECTION;
+				break;
+			case XKB_KEY_u:
+				key = NS_KEY_DELETE_LINE;
+				break;
+			case XKB_KEY_v:
+				key = NS_KEY_PASTE;
+				break;
+			case XKB_KEY_x:
+				key = NS_KEY_CUT_SELECTION;
+				break;
+			case XKB_KEY_y:
+				key = NS_KEY_REDO;
+				break;
+			case XKB_KEY_z:
+				key = mods & BROWSER_MOUSE_MOD_1 ? NS_KEY_REDO : NS_KEY_UNDO;
+				break;
+			}
+		}
+		if (key == 0)
+			key = xkb_keysym_to_utf32(sym);
+	}
+
+	e = &g->ui[g->kbd.focus];
+	if (e->impl->key)
+		e->impl->key(g, e, key);
+}
+
+void
+gui_window_axis(struct gui_window *g, bool vert, int amount)
+{
+	struct element *e;
+	struct scrollbar *s;
+	int x, y, dx, dy;
+
+	if (g->ptr.focus != UI_CONTENT)
+		return;
+
+	e = &g->ui[UI_CONTENT];
+	amount *= 8;
+	x = g->ptr.x - e->r.x0;
+	y = g->ptr.y - e->r.y0;
+
+	if (vert) {
+		s = g->scroll.v;
+		dx = 0;
+		dy = amount;
+	} else {
+		s = g->scroll.h;
+		dx = amount;
+		dy = 0;
+	}
+	if (browser_window_scroll_at_point(g->bw, x, y, dx, dy))
+		return;
+
+	if (scrollbar_scroll(s, amount))
+		platform_window_update(g->platform, &g->ui[vert ? UI_VSCROLL : UI_HSCROLL].r);
+}
 
 /**** gui_search implementation ****/
 static void
