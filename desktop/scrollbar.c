@@ -534,7 +534,7 @@ void scrollbar_set_extents(struct scrollbar *s, int length,
 	if (cur_excess <= 0) {
 		s->offset = 0;
 	} else {
-		s->offset = (full_size - visible_size) * s->offset / cur_excess;
+		s->offset = (s->full_size - s->visible_size) * s->offset / cur_excess;
 	}
 
 	well_length = s->length - 2 * SCROLLBAR_WIDTH;
