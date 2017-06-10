@@ -168,45 +168,6 @@ placecaret(struct gui_window *g, int x0, int y0, int x, int y, int h, const stru
 	});
 }
 
-static void urlcallback(void *data, struct textarea_msg *msg)
-{
-	struct gui_window *g = data;
-	const struct rect *r = &g->ui[UI_URL].r;
-	int x, y, h;
-
-	switch (msg->type) {
-	case TEXTAREA_MSG_REDRAW_REQUEST:
-		platform_window_update(g->platform, &(struct rect){
-			msg->data.redraw.x0 + r->x0, msg->data.redraw.y0 + r->y0,
-			msg->data.redraw.x1 + r->x0, msg->data.redraw.y1 + r->y0,
-		});
-		break;
-	case TEXTAREA_MSG_CARET_UPDATE:
-		switch (msg->data.caret.type) {
-		case TEXTAREA_CARET_SET_POS:
-			if (g->kbd.focus == UI_URL) {
-				x = msg->data.caret.pos.x;
-				y = msg->data.caret.pos.y;
-				h = msg->data.caret.pos.height;
-				placecaret(g, r->x0, r->y0, x, y, h, msg->data.caret.pos.clip);
-			}
-			break;
-		case TEXTAREA_CARET_HIDE:
-			if (g->kbd.focus == UI_URL)
-				removecaret(g);
-			break;
-		}
-		break;
-	case TEXTAREA_MSG_TEXT_MODIFIED:
-		break;
-	case TEXTAREA_MSG_SELECTION_REPORT:
-		LOG("selection report\n");
-		break;
-	default:
-		break;
-	}
-}
-
 static void
 navigate(struct gui_window *g)
 {
@@ -584,57 +545,6 @@ gui_window_axis(struct gui_window *g, bool vert, int amount)
 		platform_window_update(g->platform, &g->ui[vert ? UI_VSCROLL : UI_HSCROLL].r);
 }
 
-static void
-scrollcallback(void *data, struct scrollbar_msg_data *msg)
-{
-	struct gui_window *g = data;
-	int id;
-
-	if (msg->scrollbar == g->scroll.h)
-		id = UI_HSCROLL;
-	else if (msg->scrollbar == g->scroll.v)
-		id = UI_VSCROLL;
-	else
-		return;
-
-	switch (msg->msg) {
-	case SCROLLBAR_MSG_MOVED:
-		switch (id) {
-		case UI_HSCROLL:
-			if (g->scroll.x != msg->scroll_offset)
-				g->scroll.x = msg->scroll_offset;
-			break;
-		case UI_VSCROLL:
-			if (g->scroll.y != msg->scroll_offset)
-				g->scroll.y = msg->scroll_offset;
-			break;
-		}
-		platform_window_update(g->platform, &g->ui[UI_CONTENT].r);
-		platform_window_update(g->platform, &g->ui[id].r);
-		break;
-	case SCROLLBAR_MSG_SCROLL_START:
-		switch (id) {
-		case UI_HSCROLL:
-			g->scroll.hdrag = true;
-			break;
-		case UI_VSCROLL:
-			g->scroll.vdrag = true;
-			break;
-		}
-		break;
-	case SCROLLBAR_MSG_SCROLL_FINISHED:
-		switch (id) {
-		case UI_HSCROLL:
-			g->scroll.hdrag = false;
-			break;
-		case UI_VSCROLL:
-			g->scroll.vdrag = false;
-			break;
-		}
-		break;
-	}
-}
-
 /**** buttons ****/
 static void
 buttons_redraw(struct gui_window *g, struct element *e, struct rect *clip, const struct redraw_context *ctx)
@@ -707,6 +617,45 @@ static const struct elementimpl buttonsimpl = {
 };
 
 /**** url ****/
+static void urlcallback(void *data, struct textarea_msg *msg)
+{
+	struct gui_window *g = data;
+	const struct rect *r = &g->ui[UI_URL].r;
+	int x, y, h;
+
+	switch (msg->type) {
+	case TEXTAREA_MSG_REDRAW_REQUEST:
+		platform_window_update(g->platform, &(struct rect){
+			msg->data.redraw.x0 + r->x0, msg->data.redraw.y0 + r->y0,
+			msg->data.redraw.x1 + r->x0, msg->data.redraw.y1 + r->y0,
+		});
+		break;
+	case TEXTAREA_MSG_CARET_UPDATE:
+		switch (msg->data.caret.type) {
+		case TEXTAREA_CARET_SET_POS:
+			if (g->kbd.focus == UI_URL) {
+				x = msg->data.caret.pos.x;
+				y = msg->data.caret.pos.y;
+				h = msg->data.caret.pos.height;
+				placecaret(g, r->x0, r->y0, x, y, h, msg->data.caret.pos.clip);
+			}
+			break;
+		case TEXTAREA_CARET_HIDE:
+			if (g->kbd.focus == UI_URL)
+				removecaret(g);
+			break;
+		}
+		break;
+	case TEXTAREA_MSG_TEXT_MODIFIED:
+		break;
+	case TEXTAREA_MSG_SELECTION_REPORT:
+		LOG("selection report\n");
+		break;
+	default:
+		break;
+	}
+}
+
 static void
 url_redraw(struct gui_window *g, struct element *e, struct rect *clip, const struct redraw_context *ctx)
 {
@@ -776,6 +725,57 @@ static const struct elementimpl contentimpl = {
 };
 
 /**** scrollbars ****/
+static void
+scrollcallback(void *data, struct scrollbar_msg_data *msg)
+{
+	struct gui_window *g = data;
+	int id;
+
+	if (msg->scrollbar == g->scroll.h)
+		id = UI_HSCROLL;
+	else if (msg->scrollbar == g->scroll.v)
+		id = UI_VSCROLL;
+	else
+		return;
+
+	switch (msg->msg) {
+	case SCROLLBAR_MSG_MOVED:
+		switch (id) {
+		case UI_HSCROLL:
+			if (g->scroll.x != msg->scroll_offset)
+				g->scroll.x = msg->scroll_offset;
+			break;
+		case UI_VSCROLL:
+			if (g->scroll.y != msg->scroll_offset)
+				g->scroll.y = msg->scroll_offset;
+			break;
+		}
+		platform_window_update(g->platform, &g->ui[UI_CONTENT].r);
+		platform_window_update(g->platform, &g->ui[id].r);
+		break;
+	case SCROLLBAR_MSG_SCROLL_START:
+		switch (id) {
+		case UI_HSCROLL:
+			g->scroll.hdrag = true;
+			break;
+		case UI_VSCROLL:
+			g->scroll.vdrag = true;
+			break;
+		}
+		break;
+	case SCROLLBAR_MSG_SCROLL_FINISHED:
+		switch (id) {
+		case UI_HSCROLL:
+			g->scroll.hdrag = false;
+			break;
+		case UI_VSCROLL:
+			g->scroll.vdrag = false;
+			break;
+		}
+		break;
+	}
+}
+
 static struct scrollbar *
 findscrollbar(struct gui_window *g, struct element *e)
 {
