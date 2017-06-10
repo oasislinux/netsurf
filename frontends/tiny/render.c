@@ -219,8 +219,6 @@ lookupsize(const struct plot_font_style *style)
 	scaler.face_id = lookupface(style);
 	scaler.width = scaler.height = style->size * 64 / 1024;
 	scaler.pixel = 0;
-	//scaler.width = scaler.height = 20;
-	//scaler.pixel = 1;
 	scaler.x_res = scaler.y_res = browser_get_dpi();
 
 	err = FTC_Manager_LookupSize(manager, &scaler, &size);
