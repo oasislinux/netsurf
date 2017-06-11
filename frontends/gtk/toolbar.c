@@ -25,7 +25,6 @@
 #include "desktop/searchweb.h"
 #include "utils/log.h"
 #include "utils/messages.h"
-#include "utils/utils.h"
 #include "utils/nsoption.h"
 
 #include "gtk/gui.h"
@@ -126,6 +125,7 @@ static char *remove_underscores(const char *s, bool replacespace)
  *
  * \param tbbutton button reference
  * \param iconsize The size of icons to select.
+ * \param usedef Use the default image if not found.
  * \return default images.
  */
 static GtkImage *
@@ -194,6 +194,7 @@ nsgtk_theme_image_default(nsgtk_toolbar_button tbbutton,
  *
  * \param tbbutton search button reference
  * \param iconsize The size of icons to select.
+ * \param usedef Use the default image if not found.
  * \return default search image.
  */
 

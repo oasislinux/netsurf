@@ -234,15 +234,15 @@ buttons_redraw(struct gui_window *g, struct element *e, struct rect *clip, const
 
 	if (g->throbbing)
 		buttons[3] = ICON_STOP;
-	ctx->plot->clip(clip);
-	ctx->plot->rectangle(e->r.x0, e->r.y0, e->r.x1, e->r.y1, &style);
+	ctx->plot->clip(NULL, clip);
+	ctx->plot->rectangle(NULL, &style, &e->r);
 	for (i = 0; i < sizeof(buttons) / sizeof(buttons[0]); ++i) {
 		b = tiny_icons[buttons[i]];
 		w = tiny_bitmap_table->get_width(b);
 		h = tiny_bitmap_table->get_height(b);
-		ctx->plot->bitmap(e->r.x0 + i * w, e->r.y0, w, h, b, style.fill_colour, 0);
+		ctx->plot->bitmap(NULL, b, e->r.x0 + i * w, e->r.y0, w, h, style.fill_colour, 0);
 	}
-	ctx->plot->line(e->r.x0, e->r.y1 - 1, e->r.x1, e->r.y1 - 1, &style);
+	ctx->plot->line(NULL, &style, &(struct rect){e->r.x0, e->r.y1 - 1, e->r.x1, e->r.y1 - 1});
 }
 
 static void
@@ -464,7 +464,7 @@ scroll_redraw(struct gui_window *g, struct element *e, struct rect *clip, const 
 	s = findscrollbar(g, e);
 	if (!s)
 		return;
-	ctx->plot->clip(clip);  // TODO: scrollbar should probably do this
+	ctx->plot->clip(NULL, clip);  // TODO: scrollbar should probably do this
 	scrollbar_redraw(s, e->r.x0, e->r.y0, clip, 1, ctx);
 }
 
@@ -513,10 +513,10 @@ status_redraw(struct gui_window *g, struct element *e, struct rect *clip, const 
 		.stroke_width = 1,
 	};
 
-	ctx->plot->clip(clip);
-	ctx->plot->rectangle(e->r.x0, e->r.y0, e->r.x1, e->r.y1, &style);
-	ctx->plot->text(e->r.x0 + 2, e->r.y1 - 4, g->status, strlen(g->status), &fontstyle);
-	ctx->plot->line(e->r.x0, e->r.y0, e->r.x1, e->r.y0, &style);
+	ctx->plot->clip(NULL, clip);
+	ctx->plot->rectangle(NULL, &style, &e->r);
+	ctx->plot->text(NULL, &fontstyle, e->r.x0 + 2, e->r.y1 - 4, g->status, strlen(g->status));
+	ctx->plot->line(NULL, &style, &(struct rect){e->r.x0, e->r.y0, e->r.x1, e->r.y0});
 }
 
 static const struct elementimpl statusimpl = {
@@ -592,22 +592,23 @@ window_destroy(struct gui_window *g)
 	LOG("destroy\n");
 }
 
-static void
-window_update(struct gui_window *g, const struct rect *r)
+static nserror
+window_invalidate(struct gui_window *g, const struct rect *r)
 {
 	struct element *e = &g->ui[UI_CONTENT];
-	struct rect gr = {
-		e->r.x0 + r->x0 - g->scroll.x, e->r.y0 + r->y0 - g->scroll.y,
-		e->r.x1 + r->x1 - g->scroll.x, e->r.y1 + r->y1 - g->scroll.y,
-	};
 
-	platform_window_update(g->platform, &gr);
-}
+	if (r) {
+		struct rect gr = (struct rect){
+			e->r.x0 + r->x0 - g->scroll.x, e->r.y0 + r->y0 - g->scroll.y,
+			e->r.x1 + r->x1 - g->scroll.x, e->r.y1 + r->y1 - g->scroll.y,
+		};
 
-static void
-window_redraw(struct gui_window *g)
-{
-	platform_window_update(g->platform, &(struct rect){0, 0, g->width, g->height});
+		platform_window_update(g->platform, &gr);
+	} else {
+		platform_window_update(g->platform, &e->r);
+	}
+
+	return NSERROR_OK;
 }
 
 static bool
@@ -618,13 +619,14 @@ window_get_scroll(struct gui_window *g, int *sx, int *sy)
 	return true;
 }
 
-static void
-window_set_scroll(struct gui_window *g, int sx, int sy)
+static nserror
+window_set_scroll(struct gui_window *g, const struct rect *r)
 {
 	struct element *e = &g->ui[UI_CONTENT];
+	int sx, sy;
 
-	sx = max(sx, 0);
-	sy = max(sy, 0);
+	sx = max(r->x0, 0);
+	sy = max(r->y0, 0);
 	sx = min(sx, g->extent.w - rectwidth(&e->r));
 	sy = min(sy, g->extent.h - rectheight(&e->r));
 	if (g->scroll.x != sx || g->scroll.y != sy) {
@@ -636,15 +638,19 @@ window_set_scroll(struct gui_window *g, int sx, int sy)
 		platform_window_update(g->platform, &g->ui[UI_HSCROLL].r);
 		platform_window_update(g->platform, &g->ui[UI_VSCROLL].r);
 	}
+
+	return NSERROR_OK;
 }
 
-static void
+static nserror
 window_get_dimensions(struct gui_window *g, int *width, int *height, bool scaled)
 {
 	struct element *e = &g->ui[UI_CONTENT];
 
 	*width = rectwidth(&e->r);
 	*height = rectheight(&e->r);
+
+	return NSERROR_OK;
 }
 
 static void
@@ -701,13 +707,6 @@ window_update_extent(struct gui_window *g)
 	}
 
 	LOG("update_extent %d, %d\n", g->extent.w, g->extent.h);
-}
-
-static void
-window_reformat(struct gui_window *g)
-{
-	// TODO: When does this happen?
-	LOG("reformat\n");
 }
 
 static void
@@ -774,13 +773,11 @@ window_place_caret(struct gui_window *g, int x, int y, int h, const struct rect 
 static struct gui_window_table window_table = {
 	.create = window_create,
 	.destroy = window_destroy,
-	.redraw = window_redraw,
-	.update = window_update,
+	.invalidate = window_invalidate,
 	.get_scroll = window_get_scroll,
 	.set_scroll = window_set_scroll,
 	.get_dimensions = window_get_dimensions,
 	.update_extent = window_update_extent,
-	.reformat = window_reformat,
 	.set_title = window_set_title,
 	.set_url = window_set_url,
 	/* set_icon */
@@ -792,7 +789,6 @@ static struct gui_window_table window_table = {
 	.stop_throbber = window_stop_throbber,
 	/* drag_start */
 	/* save_link */
-	/* scroll_visible */
 	/* scroll_start */
 	/* new_content */
 	/* create_form_select_menu */
@@ -852,8 +848,8 @@ gui_window_redraw(struct gui_window *g, const struct rect *clip, const struct re
 		style.stroke_type = PLOT_OP_TYPE_SOLID;
 		style.stroke_width = 1;
 		style.stroke_colour = CARET_STROKE;
-		ctx->plot->clip(NULL);
-		ctx->plot->line(g->caret.x, g->caret.y, g->caret.x, g->caret.y + g->caret.h, &style);
+		ctx->plot->clip(NULL, NULL);
+		ctx->plot->line(NULL, &style, &(struct rect){g->caret.x, g->caret.y, g->caret.x, g->caret.y + g->caret.h});
 	}
 
 }

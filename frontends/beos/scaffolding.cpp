@@ -133,6 +133,9 @@ struct beos_scaffolding {
 	int			being_destroyed;
 
 	bool			fullscreen;
+
+	/** Object under menu, or 0 if no object. */
+	struct hlcache_handle		*current_menu_object;
 };
 
 struct beos_history_window {
@@ -605,8 +608,10 @@ NSBaseView::Instantiate(BMessage *archive)
 
 	struct replicant_thread_info *info = new replicant_thread_info;
 	info->url = BString(url);
-	if (nsbeos_find_app_path(info->app) < B_OK)
+	if (nsbeos_find_app_path(info->app) < B_OK) {
+                delete info;
 		return NULL;
+        }
 	info->args[0] = info->app;
 	info->args[1] = (char *)info->url.String();
 	info->args[2] = NULL;
@@ -729,6 +734,15 @@ NSBrowserWindow::MessageReceived(BMessage *message)
 		case B_ARGV_RECEIVED:
 		case B_REFS_RECEIVED:
 		case B_UI_SETTINGS_CHANGED:
+		// NetPositive messages
+		case B_NETPOSITIVE_OPEN_URL:
+		case B_NETPOSITIVE_BACK:
+		case B_NETPOSITIVE_FORWARD:
+		case B_NETPOSITIVE_HOME:
+		case B_NETPOSITIVE_RELOAD:
+		case B_NETPOSITIVE_STOP:
+		case B_NETPOSITIVE_DOWN:
+		case B_NETPOSITIVE_UP:
 			DetachCurrentMessage();
 			nsbeos_pipe_message_top(message, this, fScaffolding);
 			break;
@@ -1245,6 +1259,11 @@ void nsbeos_scaffolding_dispatch_event(nsbeos_scaffolding *scaffold, BMessage *m
 		case BROWSER_OBJECT_INFO:
 			break;
 		case BROWSER_OBJECT_RELOAD:
+			if (scaffold->current_menu_object != NULL) {
+				content_invalidate_reuse_data(scaffold->current_menu_object);
+				browser_window_reload(bw, false);
+				scaffold->current_menu_object = NULL;
+			}
 			break;
 		case BROWSER_OBJECT_SAVE:
 			break;
@@ -1505,6 +1524,8 @@ void nsbeos_attach_toplevel_view(nsbeos_scaffolding *g, BView *view)
 
 	nsbeos_scaffolding_update_colors(g);
 
+	recursively_set_menu_items_target(g->popup_menu, view);
+
 	if (g->window) {
 		recursively_set_menu_items_target(g->menu_bar, view);
 
@@ -1557,36 +1578,34 @@ static BMenuItem *make_menu_item(const char *name, BMessage *message, bool enabl
 {
 	BMenuItem *item;
 	BString label(messages_get(name));
-	BString accel;
+	BString accelKey(name);
+	accelKey += "Accel";
+	BString accel(messages_get(accelKey));
+	if (accel == accelKey)
+		accel = "";
 	uint32 mods = 0;
 	char key = 0;
 	// try to understand accelerators
-	int32 start = label.IFindLast(" ");
-	if (start > 0 && (label.Length() - start > 1)
-		&& (label.Length() - start < 7) 
-		&& (label[start + 1] == 'F' 
-		|| !strcmp(label.String() + start + 1, "PRINT")
-		|| label[start + 1] == '\xe2'
-		|| label[start + 1] == '^')) {
-
-		label.MoveInto(accel, start + 1, label.Length());
-		// strip the trailing spaces
-		while (label[label.Length() - 1] == ' ')
-			label.Truncate(label.Length() - 1);
-
+	if (!accel.IsEmpty()) {
 		if (accel.FindFirst("\xe2\x87\x91") > -1) {
 			accel.RemoveFirst("\xe2\x87\x91");
 			mods |= B_SHIFT_KEY;
 		}
 		if (accel.FindFirst("^") > -1) {
 			accel.RemoveFirst("^");
-			mods |= B_CONTROL_KEY; // ALT!!!
+			mods |= B_CONTROL_KEY;
 		}
 		if (accel.FindFirst("PRINT") > -1) {
 			accel.RemoveFirst("PRINT");
 			//mods |= ; // ALT!!!
 			key = B_PRINT_KEY;
 		}
+
+		/* replace UTF-8 glyphs (arrows...) with API codes */
+		accel.ReplaceAll("\xE2\x86\x90", (BString()+=B_LEFT_ARROW).String());
+		accel.ReplaceAll("\xE2\x86\x92", (BString()+=B_RIGHT_ARROW).String());
+		accel.ReplaceAll("\xE2\x86\x91", (BString()+=B_UP_ARROW).String());
+
 		if (accel.Length() > 1 && accel[0] == 'F') { // Function key
 			int num;
 			if (sscanf(accel.String(), "F%d", &num) > 0) {
@@ -1713,6 +1732,7 @@ nsbeos_scaffolding *nsbeos_new_scaffolding(struct gui_window *toplevel)
 
 	BMessage *message;
 	BRect rect;
+	BMenuItem *item;
 
 	g->window = NULL;
 	g->menu_bar = NULL;
@@ -1760,7 +1780,6 @@ nsbeos_scaffolding *nsbeos_new_scaffolding(struct gui_window *toplevel)
 		g->window->AddChild(g->menu_bar);
 
 		BMenu *menu;
-		BMenuItem *item;
 
 		// App menu
 		//XXX: use icon item ?
@@ -2064,7 +2083,22 @@ nsbeos_scaffolding *nsbeos_new_scaffolding(struct gui_window *toplevel)
 	g->top_view->SetScaffolding(g);
 
 	// build popup menu
-	g->popup_menu = new BPopUpMenu("");
+	g->popup_menu = new BPopUpMenu("popup", false, false);
+
+#if 0
+	message = new BMessage(BROWSER_OBJECT_INFO);
+	item = make_menu_item("ObjInfo", message);
+	g->popup_menu->AddItem(item);
+
+	message = new BMessage(BROWSER_OBJECT_SAVE);
+	item = make_menu_item("ObjSave", message);
+	g->popup_menu->AddItem(item);
+	// XXX: submenu: Sprite ?
+#endif
+
+	message = new BMessage(BROWSER_OBJECT_RELOAD);
+	item = make_menu_item("ObjReload", message, true);
+	g->popup_menu->AddItem(item);
 
 
 #ifdef ENABLE_DRAGGER
@@ -2328,8 +2362,19 @@ void gui_window_set_icon(struct gui_window *_g, hlcache_handle *icon)
 }
 
 
-void nsbeos_scaffolding_popup_menu(nsbeos_scaffolding *g, BPoint where)
+void nsbeos_scaffolding_popup_menu(nsbeos_scaffolding *scaffold, struct browser_window *bw, BPoint where, BPoint screenWhere)
 {
-	g->popup_menu->Go(where);
+	struct browser_window_features cont;
+
+	browser_window_get_features(bw, (int)where.x, (int)where.y, &cont);
+
+	scaffold->current_menu_object = cont.object;
+	bool enabled = !!scaffold->current_menu_object;
+
+	for (int i = 0; scaffold->popup_menu->ItemAt(i); i++) {
+		scaffold->popup_menu->ItemAt(i)->SetEnabled(enabled);
+	}
+
+	scaffold->popup_menu->Go(screenWhere, true, false, true);
 }
 

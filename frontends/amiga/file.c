@@ -46,6 +46,9 @@
 
 static struct Hook aslhookfunc;
 
+struct FileRequester *filereq;
+struct FileRequester *savereq;
+
 HOOKF(ULONG, ami_file_asl_mime_hook, struct FileRequester *, fr, struct AnchorPathOld *)
 {
 	char fname[1024];
@@ -89,7 +92,7 @@ void ami_file_open(struct gui_window_2 *gwin)
 			ASLFR_FilterFunc, &aslhookfunc,
 			TAG_DONE))
 	{
-		if((temp = AllocVecTagList(1024, NULL)))
+		if((temp = malloc(1024)))
 		{
 			strlcpy(temp, filereq->fr_Drawer, 1024);
 			AddPart(temp, filereq->fr_File, 1024);
@@ -107,7 +110,7 @@ void ami_file_open(struct gui_window_2 *gwin)
 				nsurl_unref(url);
 			}
 
-			FreeVec(temp);
+			free(temp);
 		}
 	}
 }
@@ -212,7 +215,7 @@ void ami_file_save(int type, char *fname, struct Window *win,
 void ami_file_save_req(int type, struct gui_window_2 *gwin,
 		struct hlcache_handle *object)
 {
-	char *fname = AllocVecTagList(1024, NULL);
+	char *fname = malloc(1024);
 	char *initial_fname = NULL;
 	char *fname_with_ext = NULL;
 	bool strip_ext = true;
@@ -223,7 +226,7 @@ void ami_file_save_req(int type, struct gui_window_2 *gwin,
 	}
 
 	if(initial_fname != NULL) {
-		fname_with_ext = AllocVecTagList(strlen(initial_fname) + 5, NULL); /* 5 = .ext\0 */
+		fname_with_ext = malloc(strlen(initial_fname) + 5); /* 5 = .ext\0 */
 
 		strcpy(fname_with_ext, initial_fname);
 
@@ -260,8 +263,8 @@ void ami_file_save_req(int type, struct gui_window_2 *gwin,
 		ami_file_save(type, fname, gwin->win, object, gwin->gw->favicon, gwin->gw->bw);
 	}
 
-	if(fname) FreeVec(fname);
-	if(fname_with_ext) FreeVec(fname_with_ext);
+	if(fname) free(fname);
+	if(fname_with_ext) free(fname_with_ext);
 }
 
 void ami_file_req_init(void)

@@ -44,7 +44,6 @@ HOST := $(shell uname -s)
 # TODO: Ideally, we want the equivalent of s/[^A-Za-z0-9]/_/g here
 HOST := $(subst .,_,$(subst -,_,$(subst /,_,$(HOST))))
 
-
 ifeq ($(HOST),)
   HOST := riscos
   $(warning Build platform determination failed but that's a known problem for RISC OS so we're assuming a native RISC OS build.)
@@ -74,7 +73,7 @@ ifeq ($(HOST),beos)
       TARGET := beos
     endif
     ifeq ($(TARGET),haiku)
-      TARGET := beos
+      override TARGET := beos
     endif
 endif
 
@@ -82,13 +81,6 @@ ifeq ($(HOST),AmigaOS)
   HOST := amiga
   ifeq ($(TARGET),)
     TARGET := amiga
-  endif
-endif
-
-ifeq ($(HOST),Darwin)
-  HOST := macosx
-  ifeq ($(TARGET),)
-    TARGET := cocoa
   endif
 endif
 
@@ -117,7 +109,7 @@ ifeq ($(TARGET),)
 endif
 
 # valid values for the TARGET
-VLDTARGET := riscos gtk gtk3 beos amiga amigaos3 framebuffer windows atari cocoa monkey
+VLDTARGET := riscos gtk gtk3 beos amiga amigaos3 framebuffer windows atari monkey
 
 # Check for valid TARGET
 ifeq ($(filter $(VLDTARGET),$(TARGET)),)
@@ -256,9 +248,6 @@ else
           PKG_CONFIG := PKG_CONFIG_LIBDIR="$(GCCSDK_INSTALL_ENV)/lib/pkgconfig" pkg-config
         endif
       else
-        ifeq ($(TARGET),cocoa)
-          PKG_CONFIG := PKG_CONFIG_PATH="$(PKG_CONFIG_PATH):/usr/local/lib/pkgconfig" pkg-config
-        else
           ifeq ($(TARGET),atari)
             ifeq ($(HOST),atari)
               PKG_CONFIG := pkg-config
@@ -298,9 +287,12 @@ else
                   CC := $(wildcard $(GCCSDK_INSTALL_CROSSBIN)/*gcc)
                   CXX := $(wildcard $(GCCSDK_INSTALL_CROSSBIN)/*g++)
                 endif
+
               else
                 # All native targets
-                PKG_CONFIG := pkg-config
+
+                # use native package config
+		PKG_CONFIG := pkg-config
 
                 # gtk target processing
 	        ifeq ($(TARGET),gtk3)
@@ -321,7 +313,6 @@ else
               endif
             endif
           endif
-        endif
       endif
     endif
   endif
@@ -342,7 +333,7 @@ endif
 CC := $(CCACHE) $(CC)
 
 # Target paths
-OBJROOT = build-$(HOST)-$(TARGET)$(SUBTARGET)
+OBJROOT = build/$(HOST)-$(TARGET)$(SUBTARGET)
 DEPROOT := $(OBJROOT)/deps
 TOOLROOT := $(OBJROOT)/tools
 
@@ -619,12 +610,22 @@ include utils/Makefile
 # http utility sources
 include utils/http/Makefile
 
+# nsurl utility sources
+include utils/nsurl/Makefile
+
 # Desktop sources
 include desktop/Makefile
 
 # S_COMMON are sources common to all builds
-S_COMMON := $(S_CONTENT) $(S_FETCHERS) $(S_RENDER) $(S_UTILS) $(S_HTTP) \
-	$(S_DESKTOP) $(S_JAVASCRIPT_BINDING)
+S_COMMON := \
+	$(S_CONTENT) \
+	$(S_FETCHERS) \
+	$(S_RENDER) \
+	$(S_UTILS) \
+	$(S_HTTP) \
+	$(S_NSURL) \
+	$(S_DESKTOP) \
+	$(S_JAVASCRIPT_BINDING)
 
 
 # ----------------------------------------------------------------------------
@@ -638,7 +639,7 @@ define split_messages
 
 $$(MESSAGES_TARGET)/$(1)/Messages.tmp: resources/FatMessages
 	$$(VQ)echo "MSGSPLIT: Language: $(1) Filter: $$(MESSAGES_FILTER)"
-	$$(Q)mkdir -p $$(MESSAGES_TARGET)/$(1)
+	$$(Q)$$(MKDIR) -p $$(MESSAGES_TARGET)/$(1)
 	$$(Q)$$(SPLIT_MESSAGES) -l $(1) -p $$(MESSAGES_FILTER) -f messages -o $$@ $$<
 
 $$(MESSAGES_TARGET)/$(1)/Messages: $$(MESSAGES_TARGET)/$(1)/Messages.tmp
@@ -878,7 +879,7 @@ install: all-program install-$(TARGET)
 
 .PHONY: docs
 
-docs: Docs/Doxyfile
+docs: docs/Doxyfile
 	doxygen $<
 
 

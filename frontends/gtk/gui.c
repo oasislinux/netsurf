@@ -49,6 +49,7 @@
 #include "desktop/save_complete.h"
 #include "desktop/save_pdf.h"
 #include "desktop/searchweb.h"
+#include "desktop/hotlist.h"
 
 #include "gtk/compat.h"
 #include "gtk/warn.h"
@@ -57,6 +58,7 @@
 #include "gtk/download.h"
 #include "gtk/fetch.h"
 #include "gtk/gui.h"
+#include "gtk/local_history.h"
 #include "gtk/global_history.h"
 #include "gtk/hotlist.h"
 #include "gtk/throbber.h"
@@ -290,6 +292,8 @@ static nserror nsgtk_init(int argc, char** argv, char **respath)
 
 	urldb_load(nsoption_charp(url_file));
 	urldb_load_cookies(nsoption_charp(cookie_file));
+	hotlist_init(nsoption_charp(hotlist_path),
+			nsoption_charp(hotlist_path));
 
 	/* The tree view system needs to know the screen's DPI, so we
 	 * find that out here, rather than when we create a first browser
@@ -435,6 +439,12 @@ static void gui_quit(void)
 		    messages_get_errorcode(res));
 	}
 
+	res = nsgtk_local_history_destroy();
+	if (res != NSERROR_OK) {
+		LOG("Error finalising local history viewer: %s",
+		    messages_get_errorcode(res));
+	}
+
 	res = nsgtk_global_history_destroy();
 	if (res != NSERROR_OK) {
 		LOG("Error finalising global history viewer: %s",
@@ -444,6 +454,12 @@ static void gui_quit(void)
 	res = nsgtk_hotlist_destroy();
 	if (res != NSERROR_OK) {
 		LOG("Error finalising hotlist viewer: %s",
+		    messages_get_errorcode(res));
+	}
+
+	res = hotlist_fini();
+	if (res != NSERROR_OK) {
+		LOG("Error finalising hotlist: %s",
 		    messages_get_errorcode(res));
 	}
 

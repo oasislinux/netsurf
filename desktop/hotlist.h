@@ -33,18 +33,49 @@ struct rect;
 /**
  * Initialise the hotlist.
  *
- * This opens the hotlist file, generating the hotlist data, and creates a
+ * This opens the hotlist file, construct the hostlist, and creates a
  * treeview.  If there's no hotlist file, it generates a default hotlist.
  *
- * This must be called before any other hotlist_* function.
+ * This must be called before any other hotlist_* function.  It must
+ * be called before URLs can be added to the hotlist, and before the
+ * hotlist can be queried to ask if URLs are present in the hotlist.
+ *
+ * In read-only mode the hotlist can be modified, but changes will not
+ * persist over sessions.
+ *
+ * \param load_path The path to load hotlist from.
+ * \param save_path The path to save hotlist to, or NULL for read-only mode.
+ * \return NSERROR_OK on success, appropriate error otherwise
+ */
+nserror hotlist_init(
+		const char *load_path,
+		const char *save_path);
+
+/**
+ * Initialise the hotlist manager.
+ *
+ * This connects the underlying hotlist treeview to a corewindow for display.
+ *
+ * The provided core window handle must be valid until hotlist_fini is called.
  *
  * \param cw_t Callback table for core_window containing the treeview
  * \param core_window_handle The handle in which the treeview is shown
- * \param path The path to hotlist file to load
  * \return NSERROR_OK on success, appropriate error otherwise
  */
-nserror hotlist_init(struct core_window_callback_table *cw_t,
-		void *core_window_handle, const char *path);
+nserror hotlist_manager_init(struct core_window_callback_table *cw_t,
+		void *core_window_handle);
+
+
+/**
+ * Finalise the hotlist manager.
+ *
+ * This simply disconnects the underlying treeview from its corewindow,
+ * allowing destruction of a GUI hotlist window, without finalising the
+ * hotlist module.
+ *
+ * \return NSERROR_OK on success, appropriate error otherwise
+ */
+nserror hotlist_manager_fini(void);
 
 /**
  * Finalise the hotlist.
@@ -53,10 +84,9 @@ nserror hotlist_init(struct core_window_callback_table *cw_t,
  * internal data.  After calling this if hotlist is required again,
  * hotlist_init must be called.
  *
- * \param path		The path to save hotlist to
  * \return NSERROR_OK on success, appropriate error otherwise
  */
-nserror hotlist_fini(const char *path);
+nserror hotlist_fini(void);
 
 /**
  * Add an entry to the hotlist for given URL.

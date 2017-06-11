@@ -29,7 +29,7 @@ CFLAGS += -I$(PREFIX)/include
 CXXFLAGS += -Dnsbeos -D_BSD_SOURCE -D_POSIX_C_SOURCE -Drestrict="" -g
 CXXFLAGS += -I$(PREFIX)/include
 
-VERSION_FULL := $(shell sed -n '/_version.*=.*"/{s/.*"\(.*\)".*/\1/;p;}' desktop/version.c)
+VERSION_FULL := $(shell sed -n '/_version.*=.*"/{s/.*"\(.*\)".*/\1/;p;}' desktop/version.c))
 VERSION_MAJ := $(shell sed -n '/_major/{s/.* = \([0-9]*\).*/\1/;p;}' desktop/version.c)
 VERSION_MIN := $(shell sed -n '/_minor/{s/.* = \([0-9]*\).*/\1/;p;}' desktop/version.c)
 
@@ -90,15 +90,15 @@ $(RSRC_BEOS): $(RDEF_BEOS) $(RDEF_IMP_BEOS)
 # ----------------------------------------------------------------------------
 
 install-beos:
-	mkdir -p $(DESTDIR)$(NETSURF_BEOS_BIN)
-	mkdir -p $(DESTDIR)$(NETSURF_BEOS_RESOURCES)
-	@copyattr -d $(EXETARGET) $(DESTDIR)$(NETSURF_BEOS_BIN)NetSurf
-	@cp -vRL $(FRONTEND_RESOURCES_DIR)/adblock.css $(DESTDIR)$(NETSURF_BEOS_RESOURCES)
-	@cp -vRL $(FRONTEND_RESOURCES_DIR)/ca-bundle.txt $(DESTDIR)$(NETSURF_BEOS_RESOURCES)
-	@cp -vRL $(FRONTEND_RESOURCES_DIR)/default.css $(DESTDIR)$(NETSURF_BEOS_RESOURCES)
-	@cp -vRL $(FRONTEND_RESOURCES_DIR)/beosdefault.css $(DESTDIR)$(NETSURF_BEOS_RESOURCES)
-	@cp -vRL $(FRONTEND_RESOURCES_DIR)/license $(DESTDIR)$(NETSURF_BEOS_RESOURCES)
-	@cp -vRL $(FRONTEND_RESOURCES_DIR)/SearchEngines $(DESTDIR)$(NETSURF_BEOS_RESOURCES)
+	$(Q)$(MKDIR) -p $(DESTDIR)$(NETSURF_BEOS_BIN)
+	$(Q)$(MKDIR) -p $(DESTDIR)$(NETSURF_BEOS_RESOURCES)
+	$(Q)copyattr -d $(EXETARGET) $(DESTDIR)$(NETSURF_BEOS_BIN)NetSurf
+	$(Q)cp -vRL $(FRONTEND_RESOURCES_DIR)/adblock.css $(DESTDIR)$(NETSURF_BEOS_RESOURCES)
+	$(Q)cp -vRL $(FRONTEND_RESOURCES_DIR)/ca-bundle.txt $(DESTDIR)$(NETSURF_BEOS_RESOURCES)
+	$(Q)cp -vRL $(FRONTEND_RESOURCES_DIR)/default.css $(DESTDIR)$(NETSURF_BEOS_RESOURCES)
+	$(Q)cp -vRL $(FRONTEND_RESOURCES_DIR)/beosdefault.css $(DESTDIR)$(NETSURF_BEOS_RESOURCES)
+	$(Q)cp -vRL $(FRONTEND_RESOURCES_DIR)/license $(DESTDIR)$(NETSURF_BEOS_RESOURCES)
+	$(Q)cp -vRL $(FRONTEND_RESOURCES_DIR)/SearchEngines $(DESTDIR)$(NETSURF_BEOS_RESOURCES)
 
 # ----------------------------------------------------------------------------
 # Package target

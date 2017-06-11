@@ -44,8 +44,10 @@
 #include "riscos/configure.h"
 #include "riscos/cookies.h"
 #include "riscos/dialog.h"
+#include "riscos/local_history.h"
 #include "riscos/global_history.h"
 #include "riscos/gui.h"
+#include "riscos/window.h"
 #include "riscos/hotlist.h"
 #include "riscos/menus.h"
 #include "riscos/save.h"
@@ -176,21 +178,24 @@ void ro_gui_dialog_init(void)
 			ro_gui_dialog_zoom_apply);
 	ro_gui_wimp_event_set_help_prefix(dialog_zoom, "HelpScaleView");
 
-	/* Treeview initialisation has moved to the end, to allow any
+	/* core window based initialisation done last to allow any
 	 * associated dialogues to be set up first.
 	 */
 
 	/* certificate verification window */
-	ro_gui_cert_preinitialise();
+	ro_gui_cert_initialise();
 
 	/* hotlist window */
-	ro_gui_hotlist_preinitialise();
+	ro_gui_hotlist_initialise();
+
+	/* local history window */
+	ro_gui_local_history_initialise();
 
 	/* global history window */
-	ro_gui_global_history_preinitialise();
+	ro_gui_global_history_initialise();
 
 	/* cookies window */
-	ro_gui_cookies_preinitialise();
+	ro_gui_cookies_initialise();
 }
 
 
@@ -510,7 +515,8 @@ void ro_gui_dialog_open_xy(wimp_w w, int x, int y)
  * /param parent the parent window (NULL for centre of screen)
  * /param child the child window
  */
-void ro_gui_dialog_open_centre_parent(wimp_w parent, wimp_w child) {
+static void ro_gui_dialog_open_centre_parent(wimp_w parent, wimp_w child)
+{
 	os_error *error;
 	wimp_window_state state;
 	int mid_x, mid_y;
@@ -545,7 +551,7 @@ void ro_gui_dialog_open_centre_parent(wimp_w parent, wimp_w child) {
 
 	/* move to the centre of the parent at the top of the stack */
 	dimension = state.visible.x1 - state.visible.x0;
-	scroll_width = ro_get_vscroll_width(history_window);
+	scroll_width = ro_get_vscroll_width(parent);
 	state.visible.x0 = mid_x - (dimension + scroll_width) / 2;
 	state.visible.x1 = state.visible.x0 + dimension;
 	dimension = state.visible.y1 - state.visible.y0;
@@ -567,10 +573,11 @@ void ro_gui_dialog_open_centre_parent(wimp_w parent, wimp_w child) {
 
 void ro_gui_dialog_open_persistent(wimp_w parent, wimp_w w, bool pointer) {
 
-	if (pointer)
+	if (pointer) {
 		ro_gui_dialog_open_at_pointer(w);
-	else
+	} else {
 		ro_gui_dialog_open_centre_parent(parent, w);
+	}
 
 	/* todo: use wimp_event definitions rather than special cases */
 	if ((w == dialog_pageinfo) || (w == dialog_objinfo))
@@ -646,12 +653,11 @@ void ro_gui_save_options(void)
 	nsoption_write("<NetSurf$ChoicesSave>", NULL, NULL);
 }
 
-bool ro_gui_dialog_zoom_apply(wimp_w w) {
+bool ro_gui_dialog_zoom_apply(wimp_w w)
+{
 	unsigned int scale;
-	bool all;
 
 	scale = atoi(ro_gui_get_icon_string(w, ICON_ZOOM_VALUE));
-	all = ro_gui_get_icon_selected_state(w, ICON_ZOOM_FRAMES);
 	ro_gui_window_set_scale(ro_gui_current_zoom_gui, scale * 0.01);
 	return true;
 }

@@ -50,10 +50,10 @@ static struct ami_protocol *ami_openurl_add_protocol(const char *url)
 {
 	nsurl *ns_url;
 	struct ami_protocol *ami_p =
-		(struct ami_protocol *)AllocVecTagList(sizeof(struct ami_protocol), NULL);
+		(struct ami_protocol *)malloc(sizeof(struct ami_protocol));
 
 	if (nsurl_create(url, &ns_url) != NSERROR_OK) {
-		FreeVec(ami_p);
+		free(ami_p);
 		return NULL;
 	}
 
@@ -61,7 +61,7 @@ static struct ami_protocol *ami_openurl_add_protocol(const char *url)
 	nsurl_unref(ns_url);
 	if (ami_p->protocol == NULL)
 	{
-		FreeVec(ami_p);
+		free(ami_p);
 		return NULL;
 	}
 
@@ -74,20 +74,20 @@ static void ami_openurl_free_list(struct MinList *list)
 	struct ami_protocol *node;
 	struct ami_protocol *nnode;
 
-	if(IsMinListEmpty(list)) return;
-	node = (struct ami_protocol *)GetHead((struct List *)list);
+	if(IsMinListEmpty(list) == NULL) {
+		node = (struct ami_protocol *)GetHead((struct List *)list);
 
-	do
-	{
-		nnode=(struct ami_protocol *)GetSucc((struct Node *)node);
+		do
+		{
+			nnode=(struct ami_protocol *)GetSucc((struct Node *)node);
 
-		Remove((struct Node *)node);
-		if (node->protocol) lwc_string_unref(node->protocol);
-		FreeVec(node);
-		node = NULL;
-	}while((node=nnode));
-
-	FreeVec(list);
+			Remove((struct Node *)node);
+			if (node->protocol) lwc_string_unref(node->protocol);
+			free(node);
+			node = NULL;
+		}while((node=nnode));
+	}
+	free(list);
 }
 
 static BOOL ami_openurl_check_list(struct MinList *list, nsurl *url)

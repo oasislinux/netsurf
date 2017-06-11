@@ -68,13 +68,26 @@
 #include "amiga/theme.h"
 #include "amiga/utf8.h"
 
+#ifndef APPNOTIFY_DisplayTime
+#define APPNOTIFY_DisplayTime   ( TAG_USER + 13 )
+#endif
+
+#ifndef APPNOTIFY_Percentage
+#define APPNOTIFY_Percentage    ( TAG_USER + 14 )
+#endif
+
+#ifndef APPNOTIFY_StopBackMsg
+#define APPNOTIFY_StopBackMsg   ( TAG_USER + 17 )
+#endif
+
 struct gui_download_window {
-	struct nsObject *node;
+	struct ami_generic_window w;
 	struct Window *win;
 	Object *objects[GID_LAST];
 	BPTR fh;
 	uint32 size;
 	uint32 downloaded;
+	uint32 progress;
 	struct dlnode *dln;
 	struct browser_window *bw;
 	struct download_context *ctx;
@@ -84,9 +97,18 @@ struct gui_download_window {
 };
 
 enum {
-	AMINS_DLOAD_OK = 0,
+	AMINS_DLOAD_PROGRESS = 0,
+	AMINS_DLOAD_OK,
 	AMINS_DLOAD_ERROR,
 	AMINS_DLOAD_ABORT,
+};
+
+static void ami_download_window_abort(void *w);
+static BOOL ami_download_window_event(void *w);
+
+static const struct ami_win_event_table ami_download_table = {
+	ami_download_window_event,
+	ami_download_window_abort,
 };
 
 static int downloads_in_progress = 0;
@@ -100,7 +122,7 @@ static struct gui_download_window *gui_download_window_create(download_context *
 	char *dl_filename = ami_utf8_easy(download_context_get_filename(ctx));
 	APTR va[3];
 
-	dw = ami_misc_allocvec_clear(sizeof(struct gui_download_window), 0);
+	dw = calloc(1, sizeof(struct gui_download_window));
 
 	if(gui && (!IsListEmpty(&gui->dllist)) && (dw->dln = (struct dlnode *)FindName(&gui->dllist,url)))
 	{
@@ -122,13 +144,13 @@ static struct gui_download_window *gui_download_window_create(download_context *
 			AddPart((STRPTR)&dw->fname,savereq->fr_File,1024);
 			if(!ami_download_check_overwrite(dw->fname, gui->shared->win, total_size))
 			{
-				FreeVec(dw);
+				free(dw);
 				return NULL;
 			}
 		}
 		else
 		{
-			FreeVec(dw);
+			free(dw);
 			return NULL;
 		}
 	}
@@ -145,11 +167,23 @@ static struct gui_download_window *gui_download_window_create(download_context *
 
 	if(!(dw->fh = FOpen((STRPTR)&dw->fname,MODE_NEWFILE,0)))
 	{
-		FreeVec(dw);
+		free(dw);
 		return NULL;
 	}
 
-	dw->objects[OID_MAIN] = WindowObj,
+	if((nsoption_bool(download_notify_progress) == true)) {
+		char bkm[1030];
+		snprintf(bkm, 1030, "STOP %p", dw);
+
+		Notify(ami_gui_get_app_id(), APPNOTIFY_Title, messages_get("amiDownloading"),
+				APPNOTIFY_PubScreenName, "FRONT",
+				APPNOTIFY_Text, dw->fname,
+				APPNOTIFY_DisplayTime, TRUE,     
+				APPNOTIFY_Percentage, 0,
+				APPNOTIFY_StopBackMsg, bkm,
+				TAG_DONE);
+	} else {
+		dw->objects[OID_MAIN] = WindowObj,
       	    WA_ScreenTitle, ami_gui_get_screen_title(),
            	WA_Title, dw->url,
            	WA_Activate, TRUE,
@@ -187,11 +221,13 @@ static struct gui_download_window *gui_download_window_create(download_context *
 			EndGroup,
 		EndWindow;
 
-	dw->win = (struct Window *)RA_OpenWindow(dw->objects[OID_MAIN]);
-	dw->ctx = ctx;
+		dw->win = (struct Window *)RA_OpenWindow(dw->objects[OID_MAIN]);
+	}
 
-	dw->node = AddObject(window_list,AMINS_DLWINDOW);
-	dw->node->objstruct = dw;
+	dw->ctx = ctx;
+	dw->result = AMINS_DLOAD_PROGRESS;
+
+	ami_gui_win_list_add(dw, AMINS_DLWINDOW, &ami_download_table);
 
 	downloads_in_progress++;
 
@@ -212,21 +248,35 @@ static nserror gui_download_window_data(struct gui_download_window *dw,
 	va[1] = (APTR)dw->size;
 	va[2] = 0;
 
-	if(dw->size)
-	{
-		RefreshSetGadgetAttrs((struct Gadget *)dw->objects[GID_STATUS], dw->win, NULL,
+	if(dw->size) {
+		if((nsoption_bool(download_notify_progress) == true) &&
+			(((dw->downloaded * 100) / dw->size) > dw->progress)) {
+			dw->progress = (uint32)((dw->downloaded * 100) / dw->size);
+			Notify(ami_gui_get_app_id(),
+					APPNOTIFY_Percentage, dw->progress,
+					TAG_DONE);
+		} else {
+			RefreshSetGadgetAttrs((struct Gadget *)dw->objects[GID_STATUS], dw->win, NULL,
 						FUELGAUGE_Level,   dw->downloaded,
 						GA_Text,           messages_get("amiDownload"),
 						FUELGAUGE_VarArgs, va,
 						TAG_DONE);
+		}
 	}
 	else
 	{
-		RefreshSetGadgetAttrs((struct Gadget *)dw->objects[GID_STATUS], dw->win, NULL,
+		if((nsoption_bool(download_notify_progress) == true)) {
+			/* unknown size, not entirely sure how to deal with this atm... */
+			Notify(ami_gui_get_app_id(),
+					APPNOTIFY_Percentage, 100,
+					TAG_DONE);
+		} else {
+			RefreshSetGadgetAttrs((struct Gadget *)dw->objects[GID_STATUS], dw->win, NULL,
 						FUELGAUGE_Level,   dw->downloaded,
 						GA_Text,           messages_get("amiDownloadU"),
 						FUELGAUGE_VarArgs, va,
 						TAG_DONE);
+		}
 	}
 
 	return NSERROR_OK;
@@ -241,11 +291,23 @@ static void gui_download_window_done(struct gui_download_window *dw)
 	if(!dw) return;
 	bw = dw->bw;
 
+	if(dw->result == AMINS_DLOAD_PROGRESS)
+		dw->result = AMINS_DLOAD_OK;
+
+	if((nsoption_bool(download_notify_progress) == true)) {
+		Notify(ami_gui_get_app_id(),
+				APPNOTIFY_Update, TRUE,
+				TAG_DONE);
+	}
+
 	if((nsoption_bool(download_notify)) && (dw->result == AMINS_DLOAD_OK))
 	{
+		char bkm[1030];
+		snprintf(bkm, 1030, "OPEN %s", dw->fname);
+
 		Notify(ami_gui_get_app_id(), APPNOTIFY_Title, messages_get("amiDownloadComplete"),
 				APPNOTIFY_PubScreenName, "FRONT",
-				APPNOTIFY_BackMsg, dw->fname,
+				APPNOTIFY_BackMsg, bkm,
 				APPNOTIFY_CloseOnDC, TRUE,
 				APPNOTIFY_Text, dw->fname,
 				TAG_DONE);
@@ -260,7 +322,7 @@ static void gui_download_window_done(struct gui_download_window *dw)
 
 		free(dln->filename);
 		Remove((struct Node *)dln);
-		FreeVec(dln);
+		free(dln);
 	}
 
 	FClose(dw->fh);
@@ -268,8 +330,11 @@ static void gui_download_window_done(struct gui_download_window *dw)
 
 	downloads_in_progress--;
 
-	DisposeObject(dw->objects[OID_MAIN]);
-	DelObject(dw->node);
+	if(dw->objects[OID_MAIN] != NULL) {
+		DisposeObject(dw->objects[OID_MAIN]);
+	}
+
+	ami_gui_win_list_remove(dw);
 	if(queuedl) {
 		nsurl *url;
 		if (nsurl_create(dln2->node.ln_Name, &url) != NSERROR_OK) {
@@ -296,18 +361,22 @@ static void gui_download_window_error(struct gui_download_window *dw,
 	gui_download_window_done(dw);
 }
 
-void ami_download_window_abort(struct gui_download_window *dw)
+static void ami_download_window_abort(void *w)
 {
+	struct gui_download_window *dw = (struct gui_download_window *)w;
 	download_context_abort(dw->ctx);
 	dw->result = AMINS_DLOAD_ABORT;
 	gui_download_window_done(dw);
 }
 
-BOOL ami_download_window_event(struct gui_download_window *dw)
+static BOOL ami_download_window_event(void *w)
 {
 	/* return TRUE if window destroyed */
+	struct gui_download_window *dw = (struct gui_download_window *)w;
 	ULONG result;
 	uint16 code;
+
+	if(dw == NULL) return FALSE; /* We may not have a real window */
 
 	while((result = RA_HandleInput(dw->objects[OID_MAIN], &code)) != WMHI_LASTMSG)
 	{
@@ -343,7 +412,7 @@ void ami_free_download_list(struct List *dllist)
 		free(node->node.ln_Name);
 		free(node->filename);
 		Remove((struct Node *)node);
-		FreeVec((struct Node *)node);
+		free((struct Node *)node);
 	}while((node=nnode));
 }
 
@@ -438,6 +507,13 @@ BOOL ami_download_check_overwrite(const char *file, struct Window *win, ULONG si
 
 	if(res == 1) return TRUE;
 		else return FALSE;
+}
+
+void ami_download_parse_backmsg(const char *backmsg)
+{
+	if((backmsg[0] == 'O') && (backmsg[1] == 'P') && (backmsg[2] == 'E') && (backmsg[3] == 'N')) {
+		OpenWorkbenchObjectA((backmsg + 5), NULL);
+	}
 }
 
 static struct gui_download_table download_table = {

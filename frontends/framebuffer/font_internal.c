@@ -26,6 +26,7 @@
 #include "utils/utf8.h"
 #include "netsurf/utf8.h"
 #include "netsurf/layout.h"
+#include "netsurf/plot_style.h"
 
 #include "framebuffer/gui.h"
 #include "framebuffer/font.h"
@@ -364,7 +365,7 @@ fb_font_width(const plot_font_style_t *fstyle,
         }
 
 	*width *= fb_get_font_size(fstyle);
-	return true;
+	return NSERROR_OK;
 }
 
 
@@ -397,7 +398,7 @@ fb_font_position(const plot_font_style_t *fstyle,
         *actual_x = x_pos;
 
         *char_offset = nxtchr;
-	return true;
+	return NSERROR_OK;
 }
 
 
@@ -455,7 +456,7 @@ fb_font_split(const plot_font_style_t *fstyle,
                          * found a space; return previous space */
                         *actual_x = last_space_x;
                         *char_offset = last_space_idx;
-                        return true;
+                        return NSERROR_OK;
                 }
 
                 nxtchr = utf8_next(string, length, nxtchr);
@@ -463,7 +464,7 @@ fb_font_split(const plot_font_style_t *fstyle,
 
         *char_offset = nxtchr;
 
-	return true;
+	return NSERROR_OK;
 }
 
 

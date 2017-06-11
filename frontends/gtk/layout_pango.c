@@ -31,6 +31,7 @@
 #include "utils/log.h"
 #include "utils/nsoption.h"
 #include "netsurf/layout.h"
+#include "netsurf/plot_style.h"
 
 #include "gtk/layout_pango.h"
 #include "gtk/plotters.h"
@@ -193,7 +194,7 @@ nsfont_split(const plot_font_style_t *fstyle,
 	pango_layout_set_single_paragraph_mode(layout, TRUE);
 
 	/* Obtain the second line of the layout (if there is one) */
-	line = pango_layout_get_line(layout, 1);
+	line = pango_layout_get_line_readonly(layout, 1);
 	if (line != NULL) {
 		/* Pango split the text. The line's start_index indicates the 
 		 * start of the character after the line break. */
@@ -221,32 +222,29 @@ nsfont_split(const plot_font_style_t *fstyle,
  * \param  fstyle  plot style for this text
  * \return  true on success, false on error and error reported
  */
-bool nsfont_paint(int x, int y, const char *string, size_t length,
+nserror nsfont_paint(int x, int y, const char *string, size_t length,
 		const plot_font_style_t *fstyle)
 {
 	PangoFontDescription *desc;
-	PangoLayout *layout;
 	PangoLayoutLine *line;
 
 	if (length == 0)
-		return true;
+		return NSERROR_OK;
 
-	layout = pango_cairo_create_layout(current_cr);
+	nsfont_pango_check();
 
 	desc = nsfont_style_to_description(fstyle);
-	pango_layout_set_font_description(layout, desc);
+	pango_layout_set_font_description(nsfont_pango_layout, desc);
 	pango_font_description_free(desc);
 
-	pango_layout_set_text(layout, string, length);
+	pango_layout_set_text(nsfont_pango_layout, string, length);
 
-	line = pango_layout_get_line_readonly(layout, 0);
+	line = pango_layout_get_line_readonly(nsfont_pango_layout, 0);
 	cairo_move_to(current_cr, x, y);
 	nsgtk_set_colour(fstyle->foreground);
 	pango_cairo_show_layout_line(current_cr, line);
 
-	g_object_unref(layout);
-
-	return true;
+	return NSERROR_OK;
 }
 
 

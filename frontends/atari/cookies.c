@@ -18,6 +18,7 @@
 
 #include <assert.h>
 
+#include "netsurf/inttypes.h"
 #include "utils/log.h"
 #include "utils/messages.h"
 #include "netsurf/mouse.h"

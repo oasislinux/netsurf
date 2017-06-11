@@ -20,38 +20,64 @@
 #define AMIGA_PLOTTERS_H
 
 #include "netsurf/plotters.h"
-#include <proto/layers.h>
-#include <proto/graphics.h>
 
 struct IBox;
-
-struct gui_globals
-{
-	struct BitMap *bm;
-	struct RastPort *rp;
-	struct Layer_Info *layerinfo;
-	APTR areabuf;
-	APTR tmprasbuf;
-	struct Rectangle rect;
-	struct MinList *shared_pens;
-	bool palette_mapped;
-	ULONG apen;
-	ULONG open;
-	LONG apen_num;
-	LONG open_num;
-	int width;  /* size of bm and    */
-	int height; /* associated memory */
-};
+struct gui_globals;
 
 extern const struct plotter_table amiplot;
 
-extern struct gui_globals *glob;
-
-void ami_init_layers(struct gui_globals *gg, ULONG width, ULONG height, bool force32bit);
-void ami_free_layers(struct gui_globals *gg);
 void ami_clearclipreg(struct gui_globals *gg);
 void ami_plot_clear_bbox(struct RastPort *rp, struct IBox *bbox);
 void ami_plot_release_pens(struct MinList *shared_pens);
 bool ami_plot_screen_is_palettemapped(void);
 
+/* Plotter render area management */
+
+/**
+ * Alloc a plotter render area
+ * \param width of render bitmap
+ * \param height of render bitmap
+ * \param force32bit allocate a 32-bit bitmap even if this does not match the screen
+ * \param alloc_pen_list set to false to use own pen list (eg. if multiple pen lists will be required)
+ * \returns pointer to render area
+ */
+struct gui_globals *ami_plot_ra_alloc(ULONG width, ULONG height, bool force32bit, bool alloc_pen_list);
+
+/**
+ * Free a plotter render area
+ * \param gg render area to free
+ */
+void ami_plot_ra_free(struct gui_globals *gg);
+
+/**
+ * Get RastPort associated with a render area
+ * \param gg render area
+ * \returns pointer to render area BitMap
+ */
+struct RastPort *ami_plot_ra_get_rastport(struct gui_globals *gg);
+
+/**
+ * Get a drawing BitMap associated with a render area
+ * \param gg render area
+ * \returns pointer to render area BitMap
+ */
+struct BitMap *ami_plot_ra_get_bitmap(struct gui_globals *gg);
+
+/**
+ * Get size of BitMap associated with a render area
+ * \param gg render area
+ * \param width updated to BitMap width
+ * \param height updated to BitMap height
+ */
+void ami_plot_ra_get_size(struct gui_globals *gg, int *width, int *height);
+
+/**
+ * Set a list of shared pens for a render area to use
+ * Only relevant for palette-mapped screens
+ * \param gg render area
+ * \param pen_list allocated by ami_AllocMinList()
+ */
+void ami_plot_ra_set_pen_list(struct gui_globals *gg, struct MinList *pen_list);
+
 #endif
+

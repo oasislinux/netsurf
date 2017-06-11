@@ -26,8 +26,8 @@
  * around the fetcher specific methods.
  *
  * Active fetches are held in the circular linked list ::fetch_ring. There may
- * be at most ::option_max_fetchers_per_host active requests per Host: header.
- * There may be at most ::option_max_fetchers active requests overall. Inactive
+ * be at most nsoption max_fetchers_per_host active requests per Host: header.
+ * There may be at most nsoption max_fetchers active requests overall. Inactive
  * fetches are stored in the ::queue_ring waiting for use.
  */
 
@@ -46,7 +46,6 @@
 #include "utils/log.h"
 #include "utils/messages.h"
 #include "utils/nsurl.h"
-#include "utils/utils.h"
 #include "utils/ring.h"
 #include "netsurf/misc.h"
 #include "desktop/gui_internal.h"
@@ -643,13 +642,6 @@ long fetch_http_code(struct fetch *fetch)
 	return fetch->http_code;
 }
 
-/* exported interface documented in content/fetch.h */
-bool fetch_get_verifiable(struct fetch *fetch)
-{
-	assert(fetch);
-
-	return fetch->verifiable;
-}
 
 /* exported interface documented in content/fetch.h */
 struct fetch_multipart_data *

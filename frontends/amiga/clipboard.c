@@ -44,8 +44,7 @@
 #include "amiga/gui.h"
 #include "amiga/iff_cset.h"
 #include "amiga/iff_dr2d.h"
-#include "amiga/menu.h"
-#include "amiga/misc.h"
+#include "amiga/gui_menu.h"
 #include "amiga/utf8.h"
 
 #define ID_UTF8  MAKE_ID('U','T','F','8')
@@ -90,11 +89,11 @@ void gui_start_selection(struct gui_window *g)
 	if(!g->shared->win) return;
 	if(nsoption_bool(kiosk_mode) == true) return;
 
-	OnMenu(g->shared->win, AMI_MENU_CLEAR);
-	OnMenu(g->shared->win, AMI_MENU_COPY);
+	ami_gui_menu_set_disabled(g->shared->win, g->shared->imenu, M_COPY, false);
+	ami_gui_menu_set_disabled(g->shared->win, g->shared->imenu, M_CLEAR, false);
 
 	if (browser_window_get_editor_flags(g->bw) & BW_EDITOR_CAN_CUT)
-		OnMenu(g->shared->win, AMI_MENU_CUT);
+		ami_gui_menu_set_disabled(g->shared->win, g->shared->imenu, M_CUT, false);
 }
 
 static char *ami_clipboard_cat_collection(struct CollectionItem *ci, LONG codeset, size_t *text_length)
@@ -114,10 +113,10 @@ static char *ami_clipboard_cat_collection(struct CollectionItem *ci, LONG codese
 			
 			case 0:
 				if(ci_new) {
-					ci_next->ci_Next = ami_misc_allocvec_clear(sizeof(struct CollectionItem), 0);
+					ci_next->ci_Next = calloc(1, sizeof(struct CollectionItem));
 					ci_next = ci_next->ci_Next;
 				} else {
-					ci_new = ami_misc_allocvec_clear(sizeof(struct CollectionItem), 0);
+					ci_new = calloc(1, sizeof(struct CollectionItem));
 					ci_next = ci_new;
 				}
 				
@@ -128,10 +127,10 @@ static char *ami_clipboard_cat_collection(struct CollectionItem *ci, LONG codese
 
 			default:
 				if(ci_new) {
-					ci_next->ci_Next = ami_misc_allocvec_clear(sizeof(struct CollectionItem), 0);
+					ci_next->ci_Next = calloc(1, sizeof(struct CollectionItem));
 					ci_next = ci_next->ci_Next;
 				} else {
-					ci_new = ami_misc_allocvec_clear(sizeof(struct CollectionItem), 0);
+					ci_new = calloc(1, sizeof(struct CollectionItem));
 					ci_next = ci_new;
 				}
 				
@@ -166,7 +165,7 @@ static char *ami_clipboard_cat_collection(struct CollectionItem *ci, LONG codese
 		
 		if(ci_new) {
 			free(ci_curr->ci_Data);
-			FreeVec(ci_curr);
+			free(ci_curr);
 		}
 	} while ((ci_curr = ci_next));
 

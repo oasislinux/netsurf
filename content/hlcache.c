@@ -16,8 +16,9 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/** \file
- * High-level resource cache (implementation)
+/**
+ * \file
+ * High-level resource cache implementation.
  */
 
 #include <assert.h>
@@ -86,7 +87,7 @@ struct hlcache_s {
 	/** Ring of retrieval contexts */
 	hlcache_retrieval_ctx *retrieval_ctx_ring;
 
-	/* statsistics */
+	/* statistics */
 	unsigned int hit_count;
 	unsigned int miss_count;
 };
@@ -420,7 +421,7 @@ static nserror hlcache_llcache_callback(llcache_handle *handle,
 
 	switch (event->type) {
 	case LLCACHE_EVENT_HAD_HEADERS:
-		error = mimesniff_compute_effective_type(handle, NULL, 0,
+		error = mimesniff_compute_effective_type(llcache_handle_get_header(handle, "Content-Type"), NULL, 0,
 				ctx->flags & HLCACHE_RETRIEVE_SNIFF_TYPE,
 				ctx->accepted_types == CONTENT_IMAGE,
 				&effective_type);
@@ -443,7 +444,7 @@ static nserror hlcache_llcache_callback(llcache_handle *handle,
 
 		break;
 	case LLCACHE_EVENT_HAD_DATA:
-		error = mimesniff_compute_effective_type(handle,
+		error = mimesniff_compute_effective_type(llcache_handle_get_header(handle, "Content-Type"),
 				event->data.data.buf, event->data.data.len,
 				ctx->flags & HLCACHE_RETRIEVE_SNIFF_TYPE,
 				ctx->accepted_types == CONTENT_IMAGE,
@@ -462,7 +463,7 @@ static nserror hlcache_llcache_callback(llcache_handle *handle,
 	case LLCACHE_EVENT_DONE:
 		/* DONE event before we could determine the effective MIME type.
 		 */
-		error = mimesniff_compute_effective_type(handle,
+		error = mimesniff_compute_effective_type(llcache_handle_get_header(handle, "Content-Type"),
 				NULL, 0, false, false, &effective_type);
 		if (error == NSERROR_OK || error == NSERROR_NOT_FOUND) {
 			error = hlcache_migrate_ctx(ctx, effective_type);
@@ -665,12 +666,12 @@ nserror hlcache_handle_retrieve(nsurl *url, uint32_t flags,
 			hlcache_llcache_callback, ctx,
 			&ctx->llcache);
 	if (error != NSERROR_OK) {
-		/* error retriving handle so free context and return error */
+		/* error retrieving handle so free context and return error */
 		free((char *) ctx->child.charset);
 		free(ctx->handle);
 		free(ctx);
 	} else {
-		/* successfuly started fetch so add new context to list */
+		/* successfully started fetch so add new context to list */
 		RING_INSERT(hlcache->retrieval_ctx_ring, ctx);
 
 		*result = ctx->handle;

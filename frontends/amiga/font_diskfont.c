@@ -39,12 +39,25 @@
 
 #define MAX_FONT_NAME_SIZE 33
 
+static plot_font_style_t *prev_fstyle = NULL;
+static struct TextFont *prev_font = NULL;
+static struct RastPort temp_rp;
+
 static struct TextFont *ami_font_bm_open(struct RastPort *rp, const plot_font_style_t *fstyle)
 {
 	struct TextFont *bmfont = NULL;
 	struct TextAttr tattr;
 	char *fontname;
 	char font[MAX_FONT_NAME_SIZE];
+
+	if((prev_fstyle != NULL) && (prev_font != NULL) &&
+		(fstyle->family == prev_fstyle->family) &&
+		(fstyle->size == prev_fstyle->size) &&
+		(fstyle->flags == prev_fstyle->flags) &&
+		(fstyle->weight == prev_fstyle->weight)) {
+		LOG("(using current font)");
+		return prev_font;
+	}
 
 	if(rp == NULL) return NULL;
 
@@ -87,16 +100,19 @@ static struct TextFont *ami_font_bm_open(struct RastPort *rp, const plot_font_st
 	tattr.ta_Name = font;
 	tattr.ta_YSize = fstyle->size / FONT_SIZE_SCALE;
 	LOG("font: %s/%d", tattr.ta_Name, tattr.ta_YSize);
+
+	if(prev_font != NULL) CloseFont(prev_font);
+
 	if((bmfont = OpenDiskFont(&tattr))) {
 		SetRPAttrs(rp, RPTAG_Font, bmfont, TAG_DONE);
 	}
 
-	return bmfont;
-}
+	if(prev_fstyle != NULL) {
+		memcpy(prev_fstyle, fstyle, sizeof(plot_font_style_t));
+		prev_font = bmfont;
+	}
 
-static void ami_font_bm_close(struct TextFont *bmfont)
-{
-	CloseFont(bmfont);
+	return bmfont;
 }
 
 static size_t ami_font_bm_convert_local_to_utf8_offset(const char *utf8string, size_t length, UWORD offset)
@@ -118,21 +134,17 @@ static nserror amiga_bm_nsfont_width(const plot_font_style_t *fstyle,
 {
 	char *localtext = NULL;
 
-	if((glob == NULL) || (glob->rp == NULL)) return NSERROR_INVALID;
 	*width = length;
 
-	struct TextFont *bmfont = ami_font_bm_open(glob->rp, fstyle);
+	struct TextFont *bmfont = ami_font_bm_open(&temp_rp, fstyle);
 	if(bmfont == NULL) return NSERROR_INVALID;
 
 	if(utf8_to_local_encoding(string, length, &localtext) != NSERROR_OK) {
-		ami_font_bm_close(bmfont);
 		return NSERROR_INVALID;
 	}
 
-	*width = TextLength(glob->rp, localtext, (UWORD)strlen(localtext));
+	*width = TextLength(&temp_rp, localtext, (UWORD)strlen(localtext));
 	free(localtext);
-
-	ami_font_bm_close(bmfont);
 
 	return NSERROR_OK;
 }
@@ -158,23 +170,19 @@ static nserror amiga_bm_nsfont_position_in_string(const plot_font_style_t *fstyl
 	char *localtext = NULL;
 	UWORD co = 0;
 
-	if((glob == NULL) || (glob->rp == NULL)) return NSERROR_INVALID;
-
-	bmfont = ami_font_bm_open(glob->rp, fstyle);
+	bmfont = ami_font_bm_open(&temp_rp, fstyle);
 	if(bmfont == NULL) return NSERROR_INVALID;
 
 	if(utf8_to_local_encoding(string, length, &localtext) != NSERROR_OK) {
-		ami_font_bm_close(bmfont);
 		return NSERROR_INVALID;
 	}
 
-	co = TextFit(glob->rp, localtext, (UWORD)strlen(localtext),
+	co = TextFit(&temp_rp, localtext, (UWORD)strlen(localtext),
 						&extent, NULL, 1, x, 32767);
 	*char_offset = ami_font_bm_convert_local_to_utf8_offset(string, length, co);
 	*actual_x = extent.te_Extent.MaxX;
 
 	free(localtext);
-	ami_font_bm_close(bmfont);
 
 	return NSERROR_OK;
 }
@@ -212,17 +220,14 @@ static nserror amiga_bm_nsfont_split(const plot_font_style_t *fstyle,
 	char *charp;
 	char *localtext;
 
-	if((glob == NULL) || (glob->rp == NULL)) return NSERROR_INVALID;
-
-	struct TextFont *bmfont = ami_font_bm_open(glob->rp, fstyle);
+	struct TextFont *bmfont = ami_font_bm_open(&temp_rp, fstyle);
 	if(bmfont == NULL) return NSERROR_INVALID;
 
 	if(utf8_to_local_encoding(string, length, &localtext) != NSERROR_OK) {
-		ami_font_bm_close(bmfont);
 		return NSERROR_INVALID;
 	}
 
-	offset = TextFit(glob->rp, localtext, (UWORD)strlen(localtext),
+	offset = TextFit(&temp_rp, localtext, (UWORD)strlen(localtext),
 				&extent, NULL, 1, (UWORD)x, 32767);
 
 	co = offset;
@@ -244,7 +249,7 @@ static nserror amiga_bm_nsfont_split(const plot_font_style_t *fstyle,
 	}
 	
 	if((co > 0) && (co < strlen(localtext))) {
-		*actual_x = TextLength(glob->rp, localtext, co);
+		*actual_x = TextLength(&temp_rp, localtext, co);
 		*char_offset = ami_font_bm_convert_local_to_utf8_offset(string, length, co);
 	} else {
 		*actual_x = x;
@@ -252,7 +257,6 @@ static nserror amiga_bm_nsfont_split(const plot_font_style_t *fstyle,
 	}
 
 	free(localtext);
-	ami_font_bm_close(bmfont);
 
 	return NSERROR_OK;
 }
@@ -273,8 +277,6 @@ static ULONG amiga_bm_nsfont_text(struct RastPort *rp, const char *string, ULONG
 		free(localtext);
 	}
 
-	ami_font_bm_close(bmfont);
-
 	return 0;
 }
 
@@ -289,5 +291,17 @@ void ami_font_diskfont_init(void)
 {
 	/* Set up table */
 	ami_nsfont = &ami_font_diskfont_table;
+
+	/* Alloc space to hold currently open font - doesn't matter if this fails */
+	prev_fstyle = calloc(1, sizeof(plot_font_style_t));
+
+	/* Init temp RastPort */
+	InitRastPort(&temp_rp);
+}
+
+void ami_font_diskfont_fini(void)
+{
+	if(prev_font != NULL) CloseFont(prev_font);
+	if(prev_fstyle != NULL) free(prev_fstyle);
 }
 

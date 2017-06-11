@@ -59,7 +59,6 @@ extern wimp_w dialog_info, dialog_saveas, dialog_zoom, dialog_pageinfo,
 extern wimp_w current_menu_window;
 extern bool current_menu_open;
 extern wimp_menu *recent_search_menu;	/* search.c */
-extern wimp_w history_window;
 extern bool gui_redraw_debug;
 extern osspriteop_area *gui_sprites;
 extern bool dialog_folder_add, dialog_entry_add, hotlist_insert;
@@ -140,39 +139,6 @@ void ro_gui_401login_init(void);
 void gui_401login_open(struct nsurl *url, const char *realm,
 		       nserror (*cb)(bool proceed, void *pw), void *cbpw);
 
-/* in window.c */
-void ro_gui_window_set_scale(struct gui_window *g, float scale);
-bool ro_gui_window_dataload(struct gui_window *g, wimp_message *message);
-void ro_gui_window_mouse_at(wimp_pointer *pointer, void *data);
-void ro_gui_window_iconise(struct gui_window *g,
-		wimp_full_message_window_info *wi);
-bool ro_gui_toolbar_dataload(struct gui_window *g, wimp_message *message);
-void ro_gui_window_redraw_all(void);
-void ro_gui_window_update_boxes(void);
-void ro_gui_window_quit(void);
-/* void ro_gui_window_close_all(void); */
-#define ro_gui_window_close_all ro_gui_window_quit  /* no need for a separate fn */
-void ro_gui_throb(void);
-void ro_gui_window_default_options(struct gui_window *gui);
-struct gui_window *ro_gui_window_lookup(wimp_w window);
-struct gui_window *ro_gui_toolbar_lookup(wimp_w window);
-bool ro_gui_window_to_window_pos(struct gui_window *g, int x, int y,
-		os_coord *pos);
-bool ro_gui_window_to_screen_pos(struct gui_window *g, int x, int y,
-		os_coord *pos);
-enum browser_mouse_state ro_gui_mouse_click_state(wimp_mouse_state buttons,
-		wimp_icon_flags type);
-enum browser_mouse_state ro_gui_mouse_drag_state(wimp_mouse_state buttons,
-		wimp_icon_flags type);
-bool ro_gui_shift_pressed(void);
-bool ro_gui_ctrl_pressed(void);
-bool ro_gui_alt_pressed(void);
-void gui_window_set_pointer(struct gui_window *g, enum gui_pointer_shape shape);
-
-/* in history.c */
-void ro_gui_history_init(void);
-void ro_gui_history_open(struct gui_window *g, bool pointer);
-
 /* in schedule.c */
 extern bool sched_active;
 extern os_t sched_time;
@@ -210,11 +176,6 @@ extern int ro_plot_origin_y;
 
 /* in theme_install.c */
 bool ro_gui_theme_install_apply(wimp_w w);
-
-/* in sslcert.c */
-nserror gui_cert_verify(struct nsurl *url,
-		const struct ssl_cert_info *certs, unsigned long num,
-		     nserror (*cb)(bool proceed, void *pw), void *cbpw);
 
 /* icon numbers */
 #define ICON_STATUS_RESIZE 0

@@ -36,8 +36,8 @@ MESSAGES_FILTER=ami
 # ----------------------------------------------------------------------------
 
 # sources purely for the Amiga build
-S_FRONTEND := gui.c tree.c history.c hotlist.c schedule.c file.c	\
-	misc.c bitmap.c font.c filetype.c utf8.c login.c		\
+S_FRONTEND := gui.c history.c hotlist.c schedule.c file.c	\
+	misc.c bitmap.c font.c filetype.c utf8.c login.c memory.c	\
 	plotters.c object.c menu.c save_pdf.c arexx.c version.c		\
 	cookies.c ctxmenu.c clipboard.c help.c font_scan.c		\
 	launch.c search.c history_local.c download.c iff_dr2d.c		\
@@ -45,7 +45,8 @@ S_FRONTEND := gui.c tree.c history.c hotlist.c schedule.c file.c	\
 	datatypes.c dt_picture.c dt_anim.c dt_sound.c plugin_hack.c	\
 	stringview/stringview.c stringview/urlhistory.c rtg.c		\
 	agclass/amigaguide_class.c os3support.c font_diskfont.c		\
-	selectmenu.c hash/xxhash.c font_cache.c font_bullet.c nsoption.c
+	selectmenu.c hash/xxhash.c font_cache.c font_bullet.c		\
+	nsoption.c corewindow.c gui_menu.c
 
 # This is the final source build list
 # Note this is deliberately *not* expanded here as common and image
@@ -75,9 +76,9 @@ AMIGA_INSTALL_TARGET_DIR := NetSurf_Amiga
 netsurf.lha: $(EXETARGET)
 	$(VQ)echo Creating netsurf.lha
 	$(Q)rm -rf $(AMIGA_INSTALL_TARGET_DIR)
-	$(Q)mkdir -p $(AMIGA_INSTALL_TARGET_DIR)/NetSurf
+	$(Q)$(MKDIR) -p $(AMIGA_INSTALL_TARGET_DIR)/NetSurf
 	$(Q)cp -p $(EXETARGET) $(AMIGA_INSTALL_TARGET_DIR)/NetSurf
-	$(Q)mkdir $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources
+	$(Q)$(MKDIR) $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources
 	$(Q)cp -rp $(AMIGA_RESOURCES) $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources
 	$(Q)cp -rp $(AMIGA_DISTRIBUTION_FILES) $(AMIGA_INSTALL_TARGET_DIR)/NetSurf
 	$(Q)cat resources/SearchEngines $(AMIGA_PKG_DIR)/SearchEngines >$(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources/SearchEngines

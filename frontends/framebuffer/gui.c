@@ -54,6 +54,7 @@
 #include "framebuffer/clipboard.h"
 #include "framebuffer/fetch.h"
 #include "framebuffer/bitmap.h"
+#include "framebuffer/local_history.h"
 
 
 #define NSFB_TOOLBAR_DEFAULT_LAYOUT "blfsrutc"
@@ -1150,7 +1151,7 @@ fb_localhistory_btn_clik(fbtk_widget_t *widget, fbtk_callback_info *cbi)
 	if (cbi->event->type != NSFB_EVENT_KEY_UP)
 		return 0;
 
-	fb_localhistory_map(gw->localhistory);
+	fb_local_history_present(fbtk, gw->bw);
 
 	return 0;
 }
@@ -1583,7 +1584,7 @@ resize_browser_widget(struct gui_window *gw, int x, int y,
 		int width, int height)
 {
 	fbtk_set_pos_and_size(gw->browser, x, y, width, height);
-	browser_window_reformat(gw->bw, false, width, height);
+	browser_window_schedule_reformat(gw->bw);
 }
 
 static void
@@ -1782,7 +1783,6 @@ gui_window_create(struct browser_window *bw,
 	gw->bw = bw;
 
 	create_normal_browser_window(gw, nsoption_int(fb_furniture_size));
-	gw->localhistory = fb_create_localhistory(bw, fbtk, nsoption_int(fb_furniture_size));
 
 	/* map and request redraw of gui window */
 	fbtk_set_mapping(gw->window, true);
@@ -1803,21 +1803,33 @@ gui_window_destroy(struct gui_window *gw)
 	free(gw);
 }
 
-static void
-gui_window_redraw_window(struct gui_window *g)
-{
-	fb_queue_redraw(g->browser, 0, 0, fbtk_get_width(g->browser), fbtk_get_height(g->browser) );
-}
 
-static void
-gui_window_update_box(struct gui_window *g, const struct rect *rect)
+/**
+ * Invalidates an area of a framebuffer browser window
+ *
+ * \param g The netsurf window being invalidated.
+ * \param rect area to redraw or NULL for the entire window area
+ * \return NSERROR_OK on success or appropriate error code
+ */
+static nserror
+fb_window_invalidate_area(struct gui_window *g, const struct rect *rect)
 {
 	struct browser_widget_s *bwidget = fbtk_get_userpw(g->browser);
-	fb_queue_redraw(g->browser,
-			rect->x0 - bwidget->scrollx,
-			rect->y0 - bwidget->scrolly,
-			rect->x1 - bwidget->scrollx,
-			rect->y1 - bwidget->scrolly);
+
+	if (rect != NULL) {
+		fb_queue_redraw(g->browser,
+				rect->x0 - bwidget->scrollx,
+				rect->y0 - bwidget->scrolly,
+				rect->x1 - bwidget->scrollx,
+				rect->y1 - bwidget->scrolly);
+	} else {
+		fb_queue_redraw(g->browser,
+				0,
+				0,
+				fbtk_get_width(g->browser),
+				fbtk_get_height(g->browser));
+	}
+	return NSERROR_OK;
 }
 
 static bool
@@ -1832,34 +1844,56 @@ gui_window_get_scroll(struct gui_window *g, int *sx, int *sy)
 	return true;
 }
 
-static void
-gui_window_set_scroll(struct gui_window *gw, int sx, int sy)
+/**
+ * Set the scroll position of a framebuffer browser window.
+ *
+ * Scrolls the viewport to ensure the specified rectangle of the
+ *   content is shown. The framebuffer implementation scrolls the contents so
+ *   the specified point in the content is at the top of the viewport.
+ *
+ * \param gw gui_window to scroll
+ * \param rect The rectangle to ensure is shown.
+ * \return NSERROR_OK on success or apropriate error code.
+ */
+static nserror
+gui_window_set_scroll(struct gui_window *gw, const struct rect *rect)
 {
 	struct browser_widget_s *bwidget = fbtk_get_userpw(gw->browser);
 	float scale = browser_window_get_scale(gw->bw);
 
 	assert(bwidget);
 
-	widget_scroll_x(gw, sx * scale, true);
-	widget_scroll_y(gw, sy * scale, true);
+	widget_scroll_x(gw, rect->x0 * scale, true);
+	widget_scroll_y(gw, rect->y0 * scale, true);
+
+	return NSERROR_OK;
 }
 
 
-static void
-gui_window_get_dimensions(struct gui_window *g,
+/**
+ * Find the current dimensions of a framebuffer browser window content area.
+ *
+ * \param gw The gui window to measure content area of.
+ * \param width receives width of window
+ * \param height receives height of window
+ * \param scaled whether to return scaled values
+ * \return NSERROR_OK on sucess and width and height updated.
+ */
+static nserror
+gui_window_get_dimensions(struct gui_window *gw,
 			  int *width,
 			  int *height,
 			  bool scaled)
 {
-	float scale = browser_window_get_scale(g->bw);
-
-	*width = fbtk_get_width(g->browser);
-	*height = fbtk_get_height(g->browser);
+	*width = fbtk_get_width(gw->browser);
+	*height = fbtk_get_height(gw->browser);
 
 	if (scaled) {
+		float scale = browser_window_get_scale(gw->bw);
 		*width /= scale;
 		*height /= scale;
 	}
+	return NSERROR_OK;
 }
 
 static void
@@ -2038,26 +2072,15 @@ gui_window_remove_caret(struct gui_window *g)
 	}
 }
 
-static void framebuffer_window_reformat(struct gui_window *gw)
-{
-	/** @todo if we ever do zooming reformat should be implemented */
-	LOG("window:%p", gw);
-
-	/*
-	  browser_window_reformat(gw->bw, false, width, height);
-	*/
-}
 
 static struct gui_window_table framebuffer_window_table = {
 	.create = gui_window_create,
 	.destroy = gui_window_destroy,
-	.redraw = gui_window_redraw_window,
-	.update = gui_window_update_box,
+	.invalidate = fb_window_invalidate_area,
 	.get_scroll = gui_window_get_scroll,
 	.set_scroll = gui_window_set_scroll,
 	.get_dimensions = gui_window_get_dimensions,
 	.update_extent = gui_window_update_extent,
-	.reformat = framebuffer_window_reformat,
 
 	.set_url = gui_window_set_url,
 	.set_status = gui_window_set_status,

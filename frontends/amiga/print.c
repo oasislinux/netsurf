@@ -96,6 +96,14 @@ struct ami_printer_info
 	struct Window *win;
 };
 
+struct ami_print_window {
+	struct ami_generic_window w;
+	struct Window *win;
+	Object *objects[OID_LAST];
+	Object *gadgets[GID_LAST];
+	struct hlcache_handle *c;
+};
+
 enum
 {
 	PGID_MAIN=0,
@@ -119,6 +127,13 @@ static struct ami_printer_info ami_print_info;
 static CONST_STRPTR gadlab[PGID_LAST];
 static STRPTR printers[11];
 
+static BOOL ami_print_event(void *w);
+
+static const struct ami_win_event_table ami_print_table = {
+	ami_print_event,
+	NULL, /* we don't explicitly close the print window on quit (or at all???) */
+};
+
 static void ami_print_ui_setup(void)
 {
 	gadlab[PGID_PRINTER] = (char *)ami_utf8_easy((char *)messages_get("Printer"));
@@ -133,11 +148,11 @@ static void ami_print_ui_free(void)
 	int i;
 
 	for(i = 0; i < PGID_LAST; i++) {
-		if(gadlab[i]) FreeVec((APTR)gadlab[i]);
+		if(gadlab[i]) free((APTR)gadlab[i]);
 	}
 
 	for(i = 0; i < 10; i++) {
-		if(printers[i]) FreeVec(printers[i]);
+		if(printers[i]) free(printers[i]);
 	}
 }
 
@@ -227,21 +242,21 @@ void ami_print_ui(struct hlcache_handle *c)
 	char filename[30];
 	int i;
 
-	struct ami_print_window *pw = ami_misc_allocvec_clear(sizeof(struct ami_print_window), 0);
+	struct ami_print_window *pw = calloc(1, sizeof(struct ami_print_window));
 
 	pw->c = c;
 
-	printers[0] = ami_misc_allocvec_clear(50, 0);
+	printers[0] = calloc(1, 50);
 	ami_print_readunit("ENV:Sys/printer.prefs", printers[0], 50, 0);
 
 	strcpy(filename,"ENV:Sys/printerN.prefs");
 	for (i = 1; i < 10; i++)
 	{
 		filename[15] = '0' + i;
-		printers[i] = AllocVecTagList(50, NULL);
+		printers[i] = malloc(50);
 		if(!ami_print_readunit(filename, printers[i], 50, i))
 		{
-			FreeVec(printers[i]);
+			free(printers[i]);
 			printers[i] = NULL;
 			break;
 		}
@@ -325,22 +340,21 @@ void ami_print_ui(struct hlcache_handle *c)
 		EndWindow;
 
 	pw->win = (struct Window *)RA_OpenWindow(pw->objects[OID_MAIN]);
-
-	pw->node = AddObject(window_list, AMINS_PRINTWINDOW);
-	pw->node->objstruct = pw;
+	ami_gui_win_list_add(pw, AMINS_PRINTWINDOW, &ami_print_table);
 }
 
 static void ami_print_close(struct ami_print_window *pw)
 {
 	DisposeObject(pw->objects[OID_MAIN]);
-	DelObject(pw->node);
+	ami_gui_win_list_remove(pw);
 
 	ami_print_ui_free();
 }
 
-BOOL ami_print_event(struct ami_print_window *pw)
+static BOOL ami_print_event(void *w)
 {
 	/* return TRUE if window destroyed */
+	struct ami_print_window *pw = (struct ami_print_window *)w;
 	ULONG result;
 	uint16 code;
 	struct hlcache_handle *c;
@@ -422,6 +436,7 @@ void ami_print(struct hlcache_handle *c, int copies)
 	ami_print_info.ps->page_width = ami_print_info.PED->ped_MaxXDots;
 	ami_print_info.ps->page_height = ami_print_info.PED->ped_MaxYDots;
 	ami_print_info.ps->scale = scale;
+	ami_print_info.ps->priv = ami_print_info.gg;
 
 	if(!print_set_up(c, &amiprinter, ami_print_info.ps, &height))
 	{
@@ -445,10 +460,8 @@ bool ami_print_cont(void)
 
 	if(ami_print_info.page <= ami_print_info.pages)
 	{
-		glob = ami_print_info.gg;
 		print_draw_next_page(&amiprinter, ami_print_info.ps);
 		ami_print_dump();
-		ami_gui_set_default_gg();
 		ret = true;
 	}
 	else 
@@ -482,13 +495,10 @@ struct MsgPort *ami_print_get_msgport(void)
 
 bool ami_print_begin(struct print_settings *ps)
 {
-	ami_print_info.gg = ami_misc_allocvec_clear(sizeof(struct gui_globals), 0);
-	if(!ami_print_info.gg) return false;
-
-	ami_init_layers(ami_print_info.gg,
-				ami_print_info.PED->ped_MaxXDots,
+	ami_print_info.gg = ami_plot_ra_alloc(ami_print_info.PED->ped_MaxXDots,
 				ami_print_info.PED->ped_MaxYDots,
-				true);
+				true, false);
+	if(!ami_print_info.gg) return false;
 
 	ami_print_info.page = 0;
 
@@ -508,10 +518,8 @@ bool ami_print_next_page(void)
 
 void ami_print_end(void)
 {
-	ami_free_layers(ami_print_info.gg);
-	FreeVec(ami_print_info.gg);
+	ami_plot_ra_free(ami_print_info.gg);
 	DisposeObject(ami_print_info.objects[OID_MAIN]);
-	ami_gui_set_default_gg();
 
 	ami_print_close_device();
 	ami_print_free();
@@ -528,7 +536,7 @@ bool ami_print_dump(void)
 	ami_print_info.PReq->io_Command = PRD_DUMPRPORT;
 	ami_print_info.PReq->io_Flags = 0;
 	ami_print_info.PReq->io_Error = 0;
-	ami_print_info.PReq->io_RastPort = ami_print_info.gg->rp;
+	ami_print_info.PReq->io_RastPort = ami_plot_ra_get_rastport(ami_print_info.gg);
 	ami_print_info.PReq->io_ColorMap = NULL;
 	ami_print_info.PReq->io_Modes = 0;
 	ami_print_info.PReq->io_SrcX = 0;

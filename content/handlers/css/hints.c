@@ -882,6 +882,7 @@ static void css_hint_margin_left_right_align_center(
 			corestring_dom_align, &attr);
 
 	if (exc == DOM_NO_ERR && attr != NULL) {
+		memset(hint, 0, sizeof(*hint) * 2);
 		if (dom_string_caseless_lwc_isequal(attr,
 						corestring_lwc_center) ||
 				dom_string_caseless_lwc_isequal(attr,
@@ -1022,6 +1023,7 @@ static void css_hint_margin_left_right_hr(
 				corestring_dom_align, &attr);
 
 	if (exc == DOM_NO_ERR && attr != NULL) {
+		memset(hint, 0, sizeof(*hint) * 2);
 		if (dom_string_caseless_lwc_isequal(attr,
 				corestring_lwc_left)) {
 			hint->prop = CSS_PROP_MARGIN_LEFT;
@@ -1584,6 +1586,7 @@ css_error node_presentational_hint(void *pw, void *node,
 		css_hint_width(pw, node);
 		break;
 	case DOM_HTML_ELEMENT_TYPE_HR:
+		css_hint_width(pw, node);
 		css_hint_margin_left_right_hr(pw, node);
 		break;
 	case DOM_HTML_ELEMENT_TYPE_TEXTAREA:

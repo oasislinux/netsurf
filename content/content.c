@@ -21,11 +21,11 @@
  * Content handling implementation.
  */
 
-#include <inttypes.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <nsutils/time.h>
 
-#include "utils/utils.h"
+#include "netsurf/inttypes.h"
 #include "utils/log.h"
 #include "utils/messages.h"
 #include "netsurf/browser_window.h"
@@ -600,12 +600,12 @@ bool content_scaled_redraw(struct hlcache_handle *h,
 	clip.x1 = width;
 	clip.y1 = height;
 
-	new_ctx.plot->clip(&clip);
+	new_ctx.plot->clip(&new_ctx, &clip);
 
 	/* Plot white background */
-	plot_ok &= new_ctx.plot->rectangle(clip.x0, clip.y0, clip.x1, clip.y1,
-			plot_style_fill_white);
-
+	plot_ok &= (new_ctx.plot->rectangle(&new_ctx,
+					    plot_style_fill_white,
+					    &clip) == NSERROR_OK);
 
 	/* Set up content redraw data */
 	data.x = 0;
@@ -628,7 +628,7 @@ bool content_scaled_redraw(struct hlcache_handle *h,
 	plot_ok &= c->handler->redraw(c, &data, &clip, &new_ctx);
 
 	if (ctx->plot->option_knockout) {
-		knockout_plot_end();
+		knockout_plot_end(ctx);
 	}
 
 	return plot_ok;
@@ -757,7 +757,7 @@ void content_broadcast(struct content *c, content_msg msg,
 {
 	struct content_user *user, *next;
 	assert(c);
-//	LOG("%p %s -> %d", c, c->url, msg);
+//	LOG("%p -> msg:%d", c, msg);
 	for (user = c->user_list->next; user != 0; user = next) {
 		next = user->next;  /* user may be destroyed during callback */
 		if (user->callback != 0)

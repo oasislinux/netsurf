@@ -36,12 +36,14 @@
 #include "windows/hotlist.h"
 
 
+/**
+ * Hotlist window container for win32.
+ */
 struct nsw32_hotlist_window {
 	struct nsw32_corewindow core;
-
-	const char *path; /**< path to users bookmarks */
 };
 
+/** hotlist window singleton */
 static struct nsw32_hotlist_window *hotlist_window = NULL;
 
 /**
@@ -83,6 +85,8 @@ nsw32_hotlist_mouse(struct nsw32_corewindow *nsw32_cw,
  * callback on draw event for hotlist window
  *
  * \param nsw32_cw The nsw32 core window structure.
+ * \param scrollx The horizontal scroll offset.
+ * \param scrolly The vertical scroll offset.
  * \param r The rectangle of the window that needs updating.
  * \return NSERROR_OK on success otherwise apropriate error code
  */
@@ -126,7 +130,7 @@ static nserror nsw32_hotlist_init(HINSTANCE hInstance)
 		return NSERROR_OK;
 	}
 
-	ncwin = malloc(sizeof(struct nsw32_hotlist_window));
+	ncwin = calloc(1, sizeof(*ncwin));
 	if (ncwin == NULL) {
 		return NSERROR_NOMEM;
 	}
@@ -143,11 +147,8 @@ static nserror nsw32_hotlist_init(HINSTANCE hInstance)
 		return res;
 	}
 
-	ncwin->path = nsoption_charp(hotlist_path);
-
-	res = hotlist_init(ncwin->core.cb_table,
-			   (struct core_window *)ncwin,
-			   ncwin->path);
+	res = hotlist_manager_init(ncwin->core.cb_table,
+			   (struct core_window *)ncwin);
 	if (res != NSERROR_OK) {
 		free(ncwin);
 		return res;
@@ -183,7 +184,7 @@ nserror nsw32_hotlist_finalise(void)
 		return NSERROR_OK;
 	}
 
-	res = hotlist_fini(hotlist_window->path);
+	res = hotlist_fini();
 	if (res == NSERROR_OK) {
 		res = nsw32_corewindow_fini(&hotlist_window->core);
 		DestroyWindow(hotlist_window->core.hWnd);

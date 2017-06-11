@@ -17,7 +17,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/** \file
+/**
+ * \file
  * Browser window private structure.
  */
 
@@ -26,34 +27,100 @@
 
 #include <libwapcaplet/libwapcaplet.h>
 
+#include "netsurf/types.h"
 #include "netsurf/browser_window.h"
+
 #include "desktop/frame_types.h"
-#include "desktop/plot_style.h"
 
 struct box;
 struct hlcache_handle;
 struct gui_window;
-struct history;
 struct selection;
+struct nsurl;
 
-/** Browser window data. */
+/**
+ * history entry page information
+ */
+struct history_page {
+	struct nsurl *url;    /**< Page URL, never NULL. */
+	lwc_string *frag_id; /** Fragment identifier, or NULL. */
+	char *title;  /**< Page title, never NULL. */
+};
+
+/**
+ * A node in the history tree.
+ */
+struct history_entry {
+	struct history_page page;
+	struct history_entry *back;  /**< Parent. */
+	struct history_entry *next;  /**< Next sibling. */
+	struct history_entry *forward;  /**< First child. */
+	struct history_entry *forward_pref;  /**< Child in direction of
+						  current entry. */
+	struct history_entry *forward_last;  /**< Last child. */
+	unsigned int children;  /**< Number of children. */
+	int x;  /**< Position of node. */
+	int y;  /**< Position of node. */
+	struct bitmap *bitmap;  /**< Thumbnail bitmap, or 0. */
+};
+
+/**
+ * History tree for a window.
+ */
+struct history {
+	/** First page in tree (page that window opened with). */
+	struct history_entry *start;
+	/** Current position in tree. */
+	struct history_entry *current;
+	/** Width of layout. */
+	int width;
+	/** Height of layout. */
+	int height;
+};
+
+/**
+ * Browser window data.
+ */
 struct browser_window {
-	/** Page currently displayed, or 0. Must have status READY or DONE. */
+	/**
+	 * Content handle of page currently displayed which must have
+	 *  READY or DONE status or NULL for no content.
+	 */
 	struct hlcache_handle *current_content;
-	/** Page being loaded, or 0. */
+	/**
+	 * Content handle of page in process of being loaded or NULL
+	 * if no page is being loaded.
+	 */
 	struct hlcache_handle *loading_content;
 
-	/** Page Favicon */
-	struct hlcache_handle *current_favicon;
-	/** handle for favicon which we started loading early */
-	struct hlcache_handle *loading_favicon;
-	/** favicon fetch already failed - prevents infinite error looping */
-	bool failed_favicon;
+	/**
+	 * Favicon
+	 */
+	struct {
+		/**
+		 * content handle of current page favicon
+		 */
+		struct hlcache_handle *current;
 
-	/** Window history structure. */
+		/**
+		 * content handle for favicon which we started loading
+		 * early
+		 */
+		struct hlcache_handle *loading;
+
+		/**
+		 * flag to indicate favicon fetch already failed which
+		 * prevents infinite error looping.
+		 */
+		bool failed;
+	} favicon;
+
+	/** local history handle. */
 	struct history *history;
 
-	/** Platform specific window data. */
+	/**
+	 * Platform specific window data only valid at top level.
+	 */
 	struct gui_window *window;
 
 	/** Busy indicator is active. */
@@ -64,23 +131,32 @@ struct browser_window {
 	/** Fragment identifier for current_content. */
 	lwc_string *frag_id;
 
-	/** Current drag status. */
-	browser_drag_type drag_type;
+	/**
+	 * Current drag status.
+	 *
+	 * These values are only vald whle type is not DRAGGING_NONE
+	 */
+	struct {
+		/** the type of drag in progress */
+		browser_drag_type type;
 
-	/** Current drag's browser window, when not in root bw. */
-	struct browser_window *drag_window;
+		/** Current drag's browser window, when not in root bw. */
+		struct browser_window *window;
 
-	/** Mouse position at start of current scroll drag. */
-	int drag_start_x;
-	int drag_start_y;
-	/** Scroll offsets at start of current scroll draw. */
-	int drag_start_scroll_x;
-	int drag_start_scroll_y;
-	/** Frame resize directions for current frame resize drag. */
-	unsigned int drag_resize_left : 1;
-	unsigned int drag_resize_right : 1;
-	unsigned int drag_resize_up : 1;
-	unsigned int drag_resize_down : 1;
+		/** Mouse position at start of current scroll drag. */
+		int start_x;
+		int start_y;
+
+		/** Scroll offsets at start of current scroll draw. */
+		int start_scroll_x;
+		int start_scroll_y;
+
+		/** Frame resize directions for current frame resize drag. */
+		unsigned int resize_left : 1;
+		unsigned int resize_right : 1;
+		unsigned int resize_up : 1;
+		unsigned int resize_down : 1;
+	} drag;
 
 	/** Current fetch is download */
 	bool download;
@@ -155,12 +231,13 @@ struct browser_window {
 	struct jscontext *jsctx;
 
 	/** cache of the currently displayed status text. */
-	char *status_text; /**< Current status bar text. */
-	int status_text_len; /**< Length of the browser_window::status_text buffer. */
-	int status_match; /**< Number of times an idempotent status-set operation was performed. */
-	int status_miss; /**< Number of times status was really updated. */
+	struct {
+		char *text; /**< Current status bar text. */
+		int text_len; /**< Length of the status::text buffer. */
+		int match; /**< Number of times an idempotent status-set operation was performed. */
+		int miss; /**< Number of times status was really updated. */
+	} status;
 };
-
 
 
 /**
@@ -173,6 +250,7 @@ struct browser_window {
 nserror browser_window_initialise_common(enum browser_window_create_flags flags,
 		struct browser_window *bw, struct browser_window *existing);
 
+
 /**
  * Get the dimensions of the area a browser window occupies
  *
@@ -184,6 +262,7 @@ nserror browser_window_initialise_common(enum browser_window_create_flags flags,
 void browser_window_get_dimensions(struct browser_window *bw,
 		int *width, int *height, bool scaled);
 
+
 /**
  * Update the extent of the inside of a browser window to that of the current
  * content
@@ -191,6 +270,7 @@ void browser_window_get_dimensions(struct browser_window *bw,
  * \param bw browser_window to update the extent of
  */
 void browser_window_update_extent(struct browser_window *bw);
+
 
 /**
  * Change the status bar of a browser window.
@@ -200,6 +280,7 @@ void browser_window_update_extent(struct browser_window *bw);
  */
 void browser_window_set_status(struct browser_window *bw, const char *text);
 
+
 /**
  * Get the root level browser window
  *
@@ -207,5 +288,58 @@ void browser_window_set_status(struct browser_window *bw, const char *text);
  * \return  root browser window
  */
 struct browser_window * browser_window_get_root(struct browser_window *bw);
+
+
+/**
+ * Create a new history tree for a browser window window.
+ *
+ * \param bw browser window to create history for.
+ *
+ * \return NSERROR_OK or appropriate error otherwise
+ */
+nserror browser_window_history_create(struct browser_window *bw);
+
+/**
+ * Clone a bw's history tree for new bw
+ *
+ * \param  existing	browser window with history to clone.
+ * \param  clone	browser window to make cloned history for.
+ *
+ * \return  NSERROR_OK or appropriate error otherwise
+ */
+nserror browser_window_history_clone(const struct browser_window *existing,
+		struct browser_window *clone);
+
+
+/**
+ * Insert a url into the history tree.
+ *
+ * \param  bw       browser window with history object
+ * \param  content  content to add to history
+ * \param  frag_id  fragment identifier, or NULL.
+ * \return NSERROR_OK or error code on faliure.
+ *
+ * The page is added after the current entry and becomes current.
+ */
+nserror browser_window_history_add(struct browser_window *bw,
+		struct hlcache_handle *content, lwc_string *frag_id);
+
+/**
+ * Update the thumbnail for the current entry.
+ *
+ * \param bw The browser window to update the history within.
+ * \param content content for current entry
+ * \return NSERROR_OK or error code on faliure.
+ */
+nserror browser_window_history_update(struct browser_window *bw,
+		struct hlcache_handle *content);
+
+/**
+ * Free a history structure.
+ *
+ * \param bw The browser window to destroy the history within.
+ */
+void browser_window_history_destroy(struct browser_window *bw);
+
 
 #endif

@@ -25,12 +25,12 @@
 #include <stdlib.h>
 #include <libwapcaplet/libwapcaplet.h>
 
+#include "netsurf/inttypes.h"
 #include "utils/config.h"
 #include "utils/nsoption.h"
 #include "utils/corestrings.h"
 #include "utils/log.h"
 #include "utils/utf8.h"
-#include "utils/utils.h"
 #include "utils/messages.h"
 #include "content/content_factory.h"
 #include "content/fetchers.h"
@@ -212,10 +212,6 @@ nserror netsurf_init(const char *store_path)
 	if (ret != NSERROR_OK)
 		return ret;
 
-	ret = mimesniff_init();
-	if (ret != NSERROR_OK)
-		return ret;
-
 	setlocale(LC_ALL, "");
 
 	/* initialise the fetchers */
@@ -262,8 +258,6 @@ void netsurf_exit(void)
 	LOG("Closing fetches");
 	fetcher_quit();
 
-	mimesniff_fini();
-
 	/* dump any remaining cache entries */
 	image_cache_fini();
 
@@ -278,6 +272,9 @@ void netsurf_exit(void)
 
 	LOG("Destroying System colours");
 	ns_system_colour_finalize();
+
+	LOG("Destroying Messages");
+	messages_destroy();
 
 	corestrings_fini();
 	LOG("Remaining lwc strings:");

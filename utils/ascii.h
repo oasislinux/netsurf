@@ -111,6 +111,17 @@ static inline bool ascii_is_alphanumerical(char c)
 }
 
 /**
+ * Test whether a character is 'a' to 'f' (lowercase).
+ *
+ * \param[in] c  Character to test.
+ * \return true iff `c` is 'a' to 'f' (lowercase), else false.
+ */
+static inline bool ascii_is_af_lower(char c)
+{
+	return (c >= 'a' && c <= 'f');
+}
+
+/**
  * Test whether a character is hexadecimal (lower case).
  *
  * \param[in] c  Character to test.
@@ -118,8 +129,18 @@ static inline bool ascii_is_alphanumerical(char c)
  */
 static inline bool ascii_is_hex_lower(char c)
 {
-	return (ascii_is_digit(c) ||
-			(c >= 'a' && c <= 'f'));
+	return (ascii_is_digit(c) || ascii_is_af_lower(c));
+}
+
+/**
+ * Test whether a character is 'A' to 'F' (uppercase).
+ *
+ * \param[in] c  Character to test.
+ * \return true iff `c` is 'A' to 'F' (uppercase), else false.
+ */
+static inline bool ascii_is_af_upper(char c)
+{
+	return (c >= 'A' && c <= 'F');
 }
 
 /**
@@ -130,8 +151,7 @@ static inline bool ascii_is_hex_lower(char c)
  */
 static inline bool ascii_is_hex_upper(char c)
 {
-	return (ascii_is_digit(c) ||
-			(c >= 'A' && c <= 'F'));
+	return (ascii_is_digit(c) || ascii_is_af_upper(c));
 }
 
 /**
@@ -143,8 +163,41 @@ static inline bool ascii_is_hex_upper(char c)
 static inline bool ascii_is_hex(char c)
 {
 	return (ascii_is_digit(c) ||
-			(c >= 'A' && c <= 'F') ||
-			(c >= 'a' && c <= 'f'));
+			ascii_is_af_upper(c) ||
+			ascii_is_af_lower(c));
+}
+
+/**
+ * Convert a hexadecimal character to its value.
+ *
+ * \param[in] c  Character to convert.
+ * \return value of character (0-15), or -256 if not a hexadecimal character.
+ */
+static inline int ascii_hex_to_value(char c)
+{
+	if (ascii_is_digit(c)) {
+		return c - '0';
+	} else if (ascii_is_af_lower(c)) {
+		return c - 'a' + 10;
+	} else if (ascii_is_af_upper(c)) {
+		return c - 'A' + 10;
+	}
+
+	/* Invalid hex */
+	return -256;
+}
+
+/**
+ * Converts two hexadecimal characters to a single number
+ *
+ * \param[in] c1  most significant hex digit.
+ * \param[in] c2  least significant hex digit.
+ * \return the total value of the two digit hex number (0-255),
+ *         or -ve if input not hex.
+ */
+static inline int ascii_hex_to_value_2_chars(char c1, char c2)
+{
+	return 16 * ascii_hex_to_value(c1) + ascii_hex_to_value(c2);
 }
 
 /**

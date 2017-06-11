@@ -545,8 +545,7 @@ void nsbeos_dispatch_event(BMessage *message)
 
 			if (buttons & B_SECONDARY_MOUSE_BUTTON) {
 				/* 2 == right button on BeOS */
-				
-				nsbeos_scaffolding_popup_menu(gui->scaffold, screenWhere);
+				nsbeos_scaffolding_popup_menu(gui->scaffold, gui->bw, where, screenWhere);
 				break;
 			}
 
@@ -912,28 +911,6 @@ void nsbeos_reflow_all_windows(void)
 }
 
 
-
-/**
- * callback from core to reformat a window.
- */
-static void beos_window_reformat(struct gui_window *g)
-{
-        if (g == NULL) {
-                return;
-        }
-
-        NSBrowserFrameView *view = g->view;
-        if (view && view->LockLooper()) {
-                BRect bounds = view->Bounds();
-                view->UnlockLooper();
-#warning XXX why - 1 & - 2 !???
-                browser_window_reformat(g->bw,
-                                        false,
-                                        bounds.Width() + 1 /* - 2*/,
-                                        bounds.Height() + 1);
-        }        
-}
-
 void nsbeos_window_destroy_browser(struct gui_window *g)
 {
 	browser_window_destroy(g->bw);
@@ -1001,39 +978,42 @@ void nsbeos_redraw_caret(struct gui_window *g)
 	g->view->UnlockLooper();
 }
 
-static void gui_window_redraw_window(struct gui_window *g)
+/**
+ * Invalidate an area of a beos browser window
+ *
+ * \param g The netsurf window being invalidated.
+ * \param rect area to redraw or NULL for entrire window area.
+ * \return NSERROR_OK or appropriate error code.
+ */
+static nserror
+beos_window_invalidate_area(struct gui_window *g, const struct rect *rect)
 {
-	if (g->view == NULL)
-		return;
-	if (!g->view->LockLooper())
-		return;
+	if (browser_window_has_content(g->bw) == false) {
+		return NSERROR_OK;
+	}
+
+	if (g->view == NULL) {
+		return NSERROR_OK;
+	}
+
+	if (!g->view->LockLooper()) {
+		return NSERROR_OK;
+	}
 
 	nsbeos_current_gc_set(g->view);
 
-	g->view->Invalidate();
+	if (rect != NULL) {
+		//XXX +1 ??
+		g->view->Invalidate(BRect(rect->x0, rect->y0,
+					  rect->x1 - 1, rect->y1 - 1));
+	} else {
+		g->view->Invalidate();
+	}
 
 	nsbeos_current_gc_set(NULL);
 	g->view->UnlockLooper();
-}
 
-static void gui_window_update_box(struct gui_window *g, const struct rect *rect)
-{
-	if (browser_window_has_content(g->bw) == false)
-		return;
-
-	if (g->view == NULL)
-		return;
-	if (!g->view->LockLooper())
-		return;
-
-	nsbeos_current_gc_set(g->view);
-
-//XXX +1 ??
-	g->view->Invalidate(BRect(rect->x0, rect->y0,
-				   rect->x1 - 1, rect->y1 - 1));
-
-	nsbeos_current_gc_set(NULL);
-	g->view->UnlockLooper();
+	return NSERROR_OK;
 }
 
 static bool gui_window_get_scroll(struct gui_window *g, int *sx, int *sy)
@@ -1054,21 +1034,39 @@ static bool gui_window_get_scroll(struct gui_window *g, int *sx, int *sy)
 	return true;
 }
 
-static void gui_window_set_scroll(struct gui_window *g, int sx, int sy)
+/**
+ * Set the scroll position of a beos browser window.
+ *
+ * Scrolls the viewport to ensure the specified rectangle of the
+ *   content is shown. The beos implementation scrolls the contents so
+ *   the specified point in the content is at the top of the viewport.
+ *
+ * \param g gui window to scroll
+ * \param rect The rectangle to ensure is shown.
+ * \return NSERROR_OK on success or apropriate error code.
+ */
+static nserror
+gui_window_set_scroll(struct gui_window *g, const struct rect *rect)
 {
 	//CALLED();
-	if (g->view == NULL)
-		return;
-	if (!g->view->LockLooper())
-		return;
+	if (g->view == NULL) {
+		return NSERROR_BAD_PARAMETER;
+	}
+	if (!g->view->LockLooper()) {
+		return NSERROR_BAD_PARAMETER;
+        }
 
 #warning XXX: report to view frame ?
-	if (g->view->ScrollBar(B_HORIZONTAL))
-		g->view->ScrollBar(B_HORIZONTAL)->SetValue(sx);
-	if (g->view->ScrollBar(B_VERTICAL))
-		g->view->ScrollBar(B_VERTICAL)->SetValue(sy);
+	if (g->view->ScrollBar(B_HORIZONTAL)) {
+		g->view->ScrollBar(B_HORIZONTAL)->SetValue(rect->x0);
+        }
+	if (g->view->ScrollBar(B_VERTICAL)) {
+		g->view->ScrollBar(B_VERTICAL)->SetValue(rect->y0);
+        }
 		
 	g->view->UnlockLooper();
+
+        return NSERROR_OK;
 }
 
 
@@ -1332,31 +1330,42 @@ static struct gui_clipboard_table clipboard_table = {
 
 struct gui_clipboard_table *beos_clipboard_table = &clipboard_table;
 
-static void gui_window_get_dimensions(struct gui_window *g, int *width, int *height,
-			       bool scaled)
+/**
+ * Find the current dimensions of a beos browser window content area.
+ *
+ * \param g The gui window to measure content area of.
+ * \param width receives width of window
+ * \param height receives height of window
+ * \param scaled whether to return scaled values
+ * \return NSERROR_OK on sucess and width and height updated
+ *          else error code.
+ */
+static nserror
+gui_window_get_dimensions(struct gui_window *g, int *width, int *height,
+                          bool scaled)
 {
-	if (g->view && g->view->LockLooper()) {
-		*width = g->view->Bounds().Width() + 1;
-		*height = g->view->Bounds().Height() + 1;
-		g->view->UnlockLooper();
-	}
+        if (g->view &&
+            g->view->LockLooper()) {
+                *width = g->view->Bounds().Width() + 1;
+                *height = g->view->Bounds().Height() + 1;
+                g->view->UnlockLooper();
 
-	if (scaled) {
-		*width /= g->scale;
-		*height /= g->scale;
-	}
+                if (scaled) {
+                        *width /= g->scale;
+                        *height /= g->scale;
+                }
+        }
+        return NSERROR_OK;
 }
 
 static struct gui_window_table window_table = {
 	gui_window_create,
 	gui_window_destroy,
-	gui_window_redraw_window,
-	gui_window_update_box,
+	beos_window_invalidate_area,
 	gui_window_get_scroll,
 	gui_window_set_scroll,
 	gui_window_get_dimensions,
 	gui_window_update_extent,
-        beos_window_reformat,
 
 	/* from scaffold */
 	gui_window_set_title,
@@ -1370,7 +1379,6 @@ static struct gui_window_table window_table = {
 	gui_window_stop_throbber,
 	NULL, //drag_start
 	NULL, //save_link
-	NULL, //scroll_visible
 	NULL, //scroll_start
 	gui_window_new_content,
 	NULL, //create_form_select_menu

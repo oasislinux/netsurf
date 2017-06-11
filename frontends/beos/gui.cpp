@@ -840,13 +840,28 @@ void nsbeos_gui_view_source(struct hlcache_handle *content)
 		 * allow it to be re-used next time NetSurf is started. The
 		 * memory overhead from doing this is under 1 byte per
 		 * filename. */
-		const char *filename = filename_request();
-		if (!filename) {
+		BString filename(filename_request());
+		if (filename.IsEmpty()) {
 			beos_warn_user("NoMemory", 0);
 			return;
 		}
+
+		lwc_string *mime = content_get_mime_type(content);
+
+		/* provide an extension, as Pe still doesn't sniff the MIME */
+		if (mime) {
+			BMimeType type(lwc_string_data(mime));
+			BMessage extensions;
+			if (type.GetFileExtensions(&extensions) == B_OK) {
+				BString ext;
+				if (extensions.FindString("extensions", &ext) == B_OK)
+					filename << "." << ext;
+			}
+			/* we unref(mime) later on, we just leak on error */
+		}
+
 		path.SetTo(TEMP_FILENAME_PREFIX);
-		path.Append(filename);
+		path.Append(filename.String());
 		BFile file(path.Path(), B_WRITE_ONLY | B_CREATE_FILE);
 		err = file.InitCheck();
 		if (err < B_OK) {
@@ -858,7 +873,7 @@ void nsbeos_gui_view_source(struct hlcache_handle *content)
 			beos_warn_user("IOError", strerror(err));
 			return;
 		}
-		lwc_string *mime = content_get_mime_type(content);
+
 		if (mime) {
 			file.WriteAttr("BEOS:TYPE", B_MIME_STRING_TYPE, 0LL, 
 				lwc_string_data(mime), lwc_string_length(mime) + 1);
@@ -877,6 +892,7 @@ void nsbeos_gui_view_source(struct hlcache_handle *content)
 
 	// apps to try
 	const char *editorSigs[] = {
+		"text/x-source-code",
 		"application/x-vnd.beunited.pe",
 		"application/x-vnd.XEmacs",
 		"application/x-vnd.Haiku-StyledEdit",
@@ -891,10 +907,11 @@ void nsbeos_gui_view_source(struct hlcache_handle *content)
 			BMessenger msgr(editorSigs[i], team);
 			if (msgr.SendMessage(&m) >= B_OK)
 				break;
+
 		}
 		
 		err = be_roster->Launch(editorSigs[i], (BMessage *)&m, &team);
-		if (err >= B_OK)
+		if (err >= B_OK || err == B_ALREADY_RUNNING)
 			break;
 	}
 }
@@ -1021,7 +1038,7 @@ int main(int argc, char** argv)
 	
 	char path[12];
 	sprintf(path,"%.2s/Messages", getenv("LC_MESSAGES"));
-	fprintf(stderr, "Loading messages from resource %s\n", path);
+	LOG("Loading messages from resource %s\n", path);
 
 	const uint8_t* res = (const uint8_t*)resources.LoadResource('data', path, &size);
 	if (size > 0 && res != NULL) {

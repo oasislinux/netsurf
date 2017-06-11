@@ -32,7 +32,8 @@
 #include "utils/dirent.h"
 #include "utils/nsoption.h"
 #include "utils/log.h"
-#include "desktop/plot_style.h"
+#include "utils/utils.h"
+#include "netsurf/plot_style.h"
 
 #include "atari/gui.h"
 #include "atari/res/netsurf.rsh"
@@ -592,7 +593,7 @@ static void form_event(int index, int external)
         else
             tmp_option_memory_cache_size += 1;
 
-        if( tmp_option_memory_cache_size < 0 )
+        if( tmp_option_memory_cache_size == 0)
             tmp_option_memory_cache_size = 1;
         if( tmp_option_memory_cache_size > 999 )
             tmp_option_memory_cache_size = 999;
@@ -609,7 +610,7 @@ static void form_event(int index, int external)
         else
             tmp_option_disc_cache_size += 1;
 
-        if( tmp_option_disc_cache_size < 0 )
+        if( tmp_option_disc_cache_size == 0 )
             tmp_option_disc_cache_size = 1;
         if( tmp_option_disc_cache_size > 9999 )
             tmp_option_disc_cache_size = 9999;

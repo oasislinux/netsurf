@@ -23,8 +23,8 @@
  * operations.
  */
 
-#ifndef _NETSURF_WINDOW_H_
-#define _NETSURF_WINDOW_H_
+#ifndef NETSURF_WINDOW_H
+#define NETSURF_WINDOW_H
 
 typedef enum gui_save_type {
 	GUI_SAVE_SOURCE,
@@ -50,10 +50,13 @@ typedef enum {
 	GDRAGGING_OTHER
 } gui_drag_type;
 
+/**
+ * Window creation control flags.
+ */
 typedef enum {
-	GW_CREATE_NONE		= 0,		/* New window */
-	GW_CREATE_CLONE		= (1 << 0),	/* Clone existing window */
-	GW_CREATE_TAB		= (1 << 1)	/* In same window as existing */
+	GW_CREATE_NONE = 0, /**< New window */
+	GW_CREATE_CLONE = (1 << 0), /**< Clone existing window */
+	GW_CREATE_TAB = (1 << 1) /**< Create tab in same window as existing */
 } gui_window_create_flags;
 
 struct browser_window;
@@ -76,19 +79,30 @@ struct gui_window_table {
 	/**
 	 * Create and open a gui window for a browsing context.
 	 *
-	 * \param bw		bw to create gui_window for
-	 * \param existing	an existing gui_window, may be NULL
-	 * \param flags		flags for gui window creation
-	 * \return gui window, or NULL on error
+	 * The implementing front end must create a context suitable
+	 *  for it to display a window referred to as the "gui window".
+	 *
+	 * The frontend will be expected to request the core redraw
+	 *  areas of the gui window which have become invalidated
+	 *  either from toolkit expose events or as a result of a
+	 *  invalidate() call.
+	 *
+	 * Most core operations used by the frontend concerning browser
+	 *  windows require passing the browser window context therefor
+	 *  the gui window must include a reference to the browser
+	 *  window passed here.
 	 *
 	 * If GW_CREATE_CLONE flag is set existing is non-NULL.
 	 *
-	 * Front end's gui_window must include a reference to the
-	 * browser window passed in the bw param.
+	 * \param bw The core browsing context associated with the gui window
+	 * \param existing An existing gui_window, may be NULL.
+	 * \param flags flags to control the gui window creation.
+	 * \return gui window, or NULL on error.
 	 */
 	struct gui_window *(*create)(struct browser_window *bw,
 			struct gui_window *existing,
 			gui_window_create_flags flags);
+
 
 	/**
 	 * Destroy previously created gui window
@@ -97,54 +111,74 @@ struct gui_window_table {
 	 */
 	void (*destroy)(struct gui_window *gw);
 
-	/**
-	 * Force a redraw of the entire contents of a window.
-	 *
-	 * @todo this API should be merged with update.
-	 *
-	 * \param g gui_window to redraw
-	 */
-	void (*redraw)(struct gui_window *g);
 
 	/**
-	 * Redraw an area of a window.
+	 * Invalidate an area of a window.
 	 *
-	 * \param g gui_window
-	 * \param rect area to redraw
+	 * The specified area of the window should now be considered
+	 *  out of date. If the area is NULL the entire window must be
+	 *  invalidated. It is expected that the windowing system will
+	 *  then subsequently cause redraw/expose operations as
+	 *  necessary.
+	 *
+	 * \note the frontend should not attempt to actually start the
+	 *  redraw operations as a result of this callback because the
+	 *  core redraw functions may already be threaded.
+	 *
+	 * \param gw The gui window to invalidate.
+	 * \param rect area to redraw or NULL for the entire window area
+	 * \return NSERROR_OK on success or appropriate error code
 	 */
-	void (*update)(struct gui_window *g, const struct rect *rect);
+	nserror (*invalidate)(struct gui_window *gw, const struct rect *rect);
+
 
 	/**
 	 * Get the scroll position of a browser window.
 	 *
-	 * \param  g   gui_window
-	 * \param  sx  receives x ordinate of point at top-left of window
-	 * \param  sy  receives y ordinate of point at top-left of window
+	 * \param gw The gui window to obtain the scroll position from.
+	 * \param sx receives x ordinate of point at top-left of window
+	 * \param sy receives y ordinate of point at top-left of window
 	 * \return true iff successful
 	 */
-	bool (*get_scroll)(struct gui_window *g, int *sx, int *sy);
+	bool (*get_scroll)(struct gui_window *gw, int *sx, int *sy);
+
 
 	/**
 	 * Set the scroll position of a browser window.
 	 *
-	 * \param  g   gui_window to scroll
-	 * \param  sx  point to place at top-left of window
-	 * \param  sy  point to place at top-left of window
+	 * scrolls the viewport to ensure the specified rectangle of
+	 *   the content is shown.
+	 * If the rectangle is of zero size i.e. x0 == x1 and y0 == y1
+	 *   the contents will be scrolled so the specified point in the
+	 *   content is at the top of the viewport.
+	 * If the size of the rectangle is non zero the frontend may
+	 *   add padding or centre the defined area or it may simply
+	 *   align as in the zero size rectangle
+	 *
+	 * \param gw The gui window to scroll.
+	 * \param rect The rectangle to ensure is shown.
+	 * \return NSERROR_OK on success or appropriate error code.
 	 */
-	void (*set_scroll)(struct gui_window *g, int sx, int sy);
+	nserror (*set_scroll)(struct gui_window *gw, const struct rect *rect);
+
 
 	/**
 	 * Find the current dimensions of a browser window's content area.
 	 *
-	 * @todo The implementations of this are buggy and its only
-	 * used from frames code.
+	 * This is used to determine the actual available drawing size
+	 * in pixels. This allows contents that can be dynamically
+	 * reformatted, such as HTML, to better use the available
+	 * space.
 	 *
-	 * \param g	 gui_window to measure
-	 * \param width	 receives width of window
+	 * \param gw The gui window to measure content area of.
+	 * \param width receives width of window
 	 * \param height receives height of window
 	 * \param scaled whether to return scaled values
+	 * \return NSERROR_OK on success and width and height updated
+	 *          else error code.
 	 */
-	void (*get_dimensions)(struct gui_window *g, int *width, int *height, bool scaled);
+	nserror (*get_dimensions)(struct gui_window *gw, int *width, int *height, bool scaled);
+
 
 	/**
 	 * Update the extent of the inside of a browser window to that of the
@@ -153,21 +187,9 @@ struct gui_window_table {
 	 * @todo this is used to update scroll bars does it need
 	 * renaming? some frontends (windows) do not even implement it.
 	 *
-	 * \param  g gui_window to update the extent of
+	 * \param gw The gui window to update the extent of.
 	 */
-	void (*update_extent)(struct gui_window *g);
-
-	/**
-	 * Reformat a window.
-	 *
-	 * This is used to perform reformats when the page contents
-	 * require reformatting. The reformat is requested using
-	 * browser_window_schedule_reformat and occurs via a scheduled
-	 * callback hence from top level context.
-	 *
-	 * \param g gui_window to reformat.
-	 */
-	void (*reformat)(struct gui_window *g);
+	void (*update_extent)(struct gui_window *gw);
 
 
 	/* Optional entries */
@@ -175,10 +197,10 @@ struct gui_window_table {
 	/**
 	 * Set the title of a window.
 	 *
-	 * \param  g	  window to update
-	 * \param  title  new window title
+	 * \param gw The gui window to set title of.
+	 * \param title new window title
 	 */
-	void (*set_title)(struct gui_window *g, const char *title);
+	void (*set_title)(struct gui_window *gw, const char *title);
 
 	/**
 	 * Set the navigation url.
@@ -264,20 +286,6 @@ struct gui_window_table {
 	 */
 	nserror (*save_link)(struct gui_window *g, struct nsurl *url, const char *title);
 
-	/**
-	 * Scrolls the specified area of a browser window into view.
-	 *
-	 * @todo investigate if this can be merged with set_scroll
-	 * which is what the default implementation used by most
-	 * toolkits uses.
-	 *
-	 * \param  g   gui_window to scroll
-	 * \param  x0  left point to ensure visible
-	 * \param  y0  bottom point to ensure visible
-	 * \param  x1  right point to ensure visible
-	 * \param  y1  top point to ensure visible
-	 */
-	void (*scroll_visible)(struct gui_window *g, int x0, int y0, int x1, int y1);
 
 	/**
 	 * Starts drag scrolling of a browser window
@@ -289,28 +297,50 @@ struct gui_window_table {
 	/**
 	 * Called when the gui_window has new content.
 	 *
-	 * \param  g  the gui_window that has new content
+	 * \param gw The gui window that has new content
 	 */
-	void (*new_content)(struct gui_window *g);
+	void (*new_content)(struct gui_window *gw);
 
 	/**
 	 * create a form select menu
+	 *
+	 * \param gw The gui window to open select menu form gadget in.
+	 * \param control The form control gadget handle.
 	 */
 	void (*create_form_select_menu)(struct gui_window *gw, struct form_control *control);
 
 	/**
 	 * Called when file chooser gadget is activated
+	 *
+	 * \param gw The gui window to open file chooser in.
+	 * \param hl The content of the object.
+	 * \param gadget The form control gadget handle.
 	 */
-	void (*file_gadget_open)(struct gui_window *g, struct hlcache_handle *hl, struct form_control *gadget);
+	void (*file_gadget_open)(struct gui_window *gw, struct hlcache_handle *hl, struct form_control *gadget);
 
-	/** object dragged to window*/
-	void (*drag_save_object)(struct gui_window *g, struct hlcache_handle *c, gui_save_type type);
+	/**
+	 * object dragged to window
+	 *
+	 * \param gw The gui window to save dragged object of.
+	 * \param c The content of the object.
+	 * \param type the type of save.
+	 */
+	void (*drag_save_object)(struct gui_window *gw, struct hlcache_handle *c, gui_save_type type);
 
-	/** drag selection save */
-	void (*drag_save_selection)(struct gui_window *g, const char *selection);
+	/**
+	 * drag selection save
+	 *
+	 * \param gw The gui window to save dragged selection of.
+	 * \param selection The selection to save.
+	 */
+	void (*drag_save_selection)(struct gui_window *gw, const char *selection);
 
-	/** selection started */
-	void (*start_selection)(struct gui_window *g);
+	/**
+	 * selection started
+	 *
+	 * \param gw The gui window to start selection in.
+	 */
+	void (*start_selection)(struct gui_window *gw);
 };
 
 #endif

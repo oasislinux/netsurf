@@ -1,5 +1,5 @@
 /*
- * Copyright 2008-2015 Chris Young <chris@unsatisfactorysoftware.co.uk>
+ * Copyright 2008-2017 Chris Young <chris@unsatisfactorysoftware.co.uk>
  *
  * This file is part of NetSurf, http://www.netsurf-browser.org/
  *
@@ -28,7 +28,7 @@
 #include "netsurf/window.h"
 #include "netsurf/mouse.h"
 
-#include "amiga/menu.h"
+#include "amiga/gui_menu.h"
 #include "amiga/object.h"
 #include "amiga/os3support.h"
 
@@ -87,12 +87,32 @@ enum
 };
 
 struct find_window;
-struct history_window;
+struct ami_history_local_window;
+struct ami_menu_data;
 
 #define AMI_GUI_TOOLBAR_MAX 20
 
-struct gui_window_2 {
+struct ami_win_event_table {
+	/* callback to handle events when using a shared msgport
+	 *
+	 * @param pointer to our window structure (must start with ami_generic_window)
+	 * @return TRUE if window was destroyed during event processing
+	 */
+	BOOL (*event)(void *w);
+
+	/* callback for explicit window closure
+	 * some windows are implicitly closed by the browser and should set this to NULL
+	*/
+	void (*close)(void *w);
+};
+
+struct ami_generic_window {
 	struct nsObject *node;
+	const struct ami_win_event_table *tbl;
+};
+
+struct gui_window_2 {
+	struct ami_generic_window w;
 	struct Window *win;
 	Object *restrict objects[GID_LAST];
 	struct gui_window *gw; /* currently-displayed gui_window */
@@ -113,13 +133,7 @@ struct gui_window_2 {
 	int temp;
 	bool redraw_scroll;
 	bool new_content;
-	char *restrict menulab[AMI_MENU_AREXX_MAX + 1];
-	Object *restrict menuobj[AMI_MENU_AREXX_MAX + 1];
-	char menukey[AMI_MENU_AREXX_MAX + 1];
-	char *restrict menuicon[AMI_MENU_AREXX_MAX + 1];
-	struct Hook menu_hook[AMI_MENU_AREXX_MAX + 1];
-	UBYTE *menutype;
-	struct NewMenu *menu;
+	struct ami_menu_data *menu_data[AMI_MENU_AREXX_MAX + 1]; /* only for GadTools menus */
 	ULONG hotlist_items;
 	Object *restrict hotlist_toolbar_lab[AMI_GUI_TOOLBAR_MAX];
 	struct List hotlist_toolbar_list;
@@ -144,7 +158,6 @@ struct gui_window_2 {
 	struct MinList *shared_pens;
 	gui_pointer_shape mouse_pointer;
 	struct Menu *imenu; /* Intuition menu */
-	struct VisualInfo *vi; /* For GadTools menu */
 	bool closed; /* Window has been closed (via menu) */
 };
 
@@ -160,7 +173,7 @@ struct gui_window
 	int c_h_temp;
 	int scrollx;
 	int scrolly;
-	struct history_window *hw;
+	struct ami_history_local_window *hw;
 	struct List dllist;
 	struct hlcache_handle *favicon;
 	bool throbbing;
@@ -171,16 +184,20 @@ struct gui_window
 	float scale;
 };
 
-extern struct MinList *window_list;
+extern struct MinList *window_list; /**\todo stop arexx.c poking about in here */
 extern struct Screen *scrn;
 extern struct MsgPort *sport;
 extern struct gui_window *cur_gw;
 
+/* The return value for these functions must be deallocated using FreeVec() */
+STRPTR ami_locale_langs(int *codeset);
+char *ami_gui_get_cache_favicon_name(struct nsurl *url, bool only_if_avail);
+
+/* Functions lacking documentation */
 void ami_get_msg(void);
 void ami_try_quit(void);
 void ami_quit_netsurf(void);
 void ami_schedule_redraw(struct gui_window_2 *gwin, bool full_redraw);
-STRPTR ami_locale_langs(int *codeset);
 int ami_key_to_nskey(ULONG keycode, struct InputEvent *ie);
 bool ami_text_box_at_point(struct gui_window_2 *gwin, ULONG *restrict x, ULONG *restrict y);
 bool ami_mouse_to_ns_coords(struct gui_window_2 *gwin, int *restrict x, int *restrict y,
@@ -192,7 +209,6 @@ void ami_gui_tabs_toggle_all(void);
 bool ami_locate_resource(char *fullpath, const char *file);
 void ami_gui_update_hotlist_button(struct gui_window_2 *gwin);
 nserror ami_gui_new_blank_tab(struct gui_window_2 *gwin);
-char *ami_gui_get_cache_favicon_name(struct nsurl *url, bool only_if_avail);
 int ami_gui_count_windows(int window, int *tabs);
 void ami_gui_set_scale(struct gui_window *gw, float scale);
 
@@ -200,9 +216,9 @@ void ami_gui_set_scale(struct gui_window *gw, float scale);
 /**
  * Close a window and all tabs attached to it.
  *
- * @param gwin gui_window_2 to act upon.
+ * @param w gui_window_2 to act upon.
  */
-void ami_gui_close_window(struct gui_window_2 *gwin);
+void ami_gui_close_window(void *w);
 
 /**
  * Close all tabs in a window except the active one.
@@ -242,13 +258,30 @@ uint32 ami_gui_get_app_id(void);
 STRPTR ami_gui_get_screen_title(void);
 
 /**
- * Set gui_globals back to the default for the browser context
- */
-void ami_gui_set_default_gg(void);
-
-/**
  * Switch to the most-recently-opened tab
  */
 void ami_gui_switch_to_new_tab(struct gui_window_2 *gwin);
+
+/**
+ * Add a window to the NetSurf window list (to enable event processing)
+ */
+nserror ami_gui_win_list_add(void *win, int type, const struct ami_win_event_table *table);
+
+/**
+ * Remove a window from the NetSurf window list
+ */
+void ami_gui_win_list_remove(void *win);
+
+/**
+ * Get which qualifier keys are being pressed
+ */
+int ami_gui_get_quals(Object *win_obj);
+
+/**
+ * Check rect is not already queued for redraw
+ */
+bool ami_gui_window_update_box_deferred_check(struct MinList *deferred_rects,
+				const struct rect *restrict new_rect, APTR mempool);
+
 #endif
 

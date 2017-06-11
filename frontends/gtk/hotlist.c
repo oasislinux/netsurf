@@ -38,11 +38,13 @@
 #include "gtk/corewindow.h"
 #include "gtk/hotlist.h"
 
+/**
+ * hotlist window container for gtk.
+ */
 struct nsgtk_hotlist_window {
 	struct nsgtk_corewindow core;
 	GtkBuilder *builder;
 	GtkWindow *wnd;
-	const char *path; /**< path to users bookmarks */
 };
 
 static struct nsgtk_hotlist_window *hotlist_window = NULL;
@@ -317,7 +319,7 @@ static nserror nsgtk_hotlist_init(void)
 		return NSERROR_OK;
 	}
 
-	ncwin = malloc(sizeof(struct nsgtk_hotlist_window));
+	ncwin = calloc(1, sizeof(*ncwin));
 	if (ncwin == NULL) {
 		return NSERROR_NOMEM;
 	}
@@ -358,11 +360,8 @@ static nserror nsgtk_hotlist_init(void)
 		return res;
 	}
 
-	ncwin->path = nsoption_charp(hotlist_path);
-
-	res = hotlist_init(ncwin->core.cb_table,
-			   (struct core_window *)ncwin,
-			   ncwin->path);
+	res = hotlist_manager_init(ncwin->core.cb_table,
+			   (struct core_window *)ncwin);
 	if (res != NSERROR_OK) {
 		free(ncwin);
 		return res;
@@ -399,7 +398,7 @@ nserror nsgtk_hotlist_destroy(void)
 		return NSERROR_OK;
 	}
 
-	res = hotlist_fini(hotlist_window->path);
+	res = hotlist_manager_fini();
 	if (res == NSERROR_OK) {
 		res = nsgtk_corewindow_fini(&hotlist_window->core);
 		gtk_widget_destroy(GTK_WIDGET(hotlist_window->wnd));

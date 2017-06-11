@@ -25,13 +25,12 @@
 
 #include "utils/log.h"
 #include "utils/messages.h"
-#include "utils/utils.h"
 #include "utils/nsoption.h"
 #include "utils/nsurl.h"
+#include "netsurf/inttypes.h"
 #include "netsurf/keypress.h"
 #include "content/content.h"
 #include "desktop/hotlist.h"
-#include "desktop/tree.h"
 
 #include "atari/gui.h"
 #include "atari/misc.h"
@@ -42,6 +41,8 @@
 #include "atari/res/netsurf.rsh"
 
 extern GRECT desk_area;
+
+const char *tree_hotlist_path;
 
 struct atari_hotlist hl;
 
@@ -72,13 +73,13 @@ static nserror atari_hotlist_init_phase2(struct core_window *cw,
 					 struct core_window_callback_table *cb_t)
 {
 	LOG("cw:%p", cw);
-	return(hotlist_init(cb_t, cw, hl.path));
+	return hotlist_manager_init(cb_t, cw);
 }
 
 static void atari_hotlist_finish(struct core_window *cw)
 {
 	LOG("cw:%p", cw);
-	hotlist_fini(hl.path);
+	hotlist_fini();
 }
 
 static void atari_hotlist_draw(struct core_window *cw, int x,
@@ -90,12 +91,12 @@ static void atari_hotlist_draw(struct core_window *cw, int x,
 
 static void atari_hotlist_keypress(struct core_window *cw, uint32_t ucs4)
 {
-	GUIWIN *gemtk_win;
-	GRECT area;
+	//GUIWIN *gemtk_win;
+	//GRECT area;
 	LOG("ucs4: %"PRIu32 , ucs4);
 	hotlist_keypress(ucs4);
-	gemtk_win = atari_treeview_get_gemtk_window(cw);
-	atari_treeview_get_grect(cw, TREEVIEW_AREA_CONTENT, &area);
+	//gemtk_win = atari_treeview_get_gemtk_window(cw);
+	//atari_treeview_get_grect(cw, TREEVIEW_AREA_CONTENT, &area);
 	//gemtk_wm_exec_redraw(gemtk_win, &area);
 }
 
@@ -198,6 +199,7 @@ void atari_hotlist_init(void)
 		}
 
 		LOG("Hotlist: %s", (char *)&hl.path);
+		hotlist_init(hl.path, hl.path);
 
 		if( hl.window == NULL ){
 			int flags = ATARI_TREEVIEW_WIDGETS;

@@ -46,12 +46,11 @@
 
 #include "amiga/gui.h"
 #include "amiga/libs.h"
-#include "amiga/misc.h"
 #include "amiga/object.h"
 #include "amiga/login.h"
 
 struct gui_login_window {
-	struct nsObject *node;
+	struct ami_generic_window w;
 	struct Window *win;
 	Object *objects[GID_LAST];
 	nserror (*cb)(bool proceed, void *pw);
@@ -63,11 +62,19 @@ struct gui_login_window {
 	char pwd[256];
 };
 
+static BOOL ami_401login_event(void *w);
+
+static const struct ami_win_event_table ami_login_table = {
+	ami_401login_event,
+	NULL, /* we don't explicitly close the login window at all.
+			@todo check if this prevents us from quitting NetSurf */
+};
+
 void gui_401login_open(nsurl *url, const char *realm,
 		nserror (*cb)(bool proceed, void *pw), void *cbpw)
 {
 	const char *auth;
-	struct gui_login_window *lw = ami_misc_allocvec_clear(sizeof(struct gui_login_window), 0);
+	struct gui_login_window *lw = calloc(1, sizeof(struct gui_login_window));
 	lwc_string *host = nsurl_get_component(url, NSURL_HOST);
 
 	assert(host != NULL);
@@ -169,9 +176,7 @@ void gui_401login_open(nsurl *url, const char *realm,
 		EndWindow;
 
 	lw->win = (struct Window *)RA_OpenWindow(lw->objects[OID_MAIN]);
-
-	lw->node = AddObject(window_list,AMINS_LOGINWINDOW);
-	lw->node->objstruct = lw;
+	ami_gui_win_list_add(lw, AMINS_LOGINWINDOW, &ami_login_table);
 }
 
 static void ami_401login_close(struct gui_login_window *lw)
@@ -183,7 +188,7 @@ static void ami_401login_close(struct gui_login_window *lw)
 	DisposeObject(lw->objects[OID_MAIN]);
 	lwc_string_unref(lw->host);
 	nsurl_unref(lw->url);
-	DelObject(lw->node);
+	ami_gui_win_list_remove(lw);
 }
 
 static void ami_401login_login(struct gui_login_window *lw)
@@ -207,9 +212,10 @@ static void ami_401login_login(struct gui_login_window *lw)
 	ami_401login_close(lw);
 }
 
-BOOL ami_401login_event(struct gui_login_window *lw)
+static BOOL ami_401login_event(void *w)
 {
 	/* return TRUE if window destroyed */
+	struct gui_login_window *lw = (struct gui_login_window *)w;
 	ULONG result;
 	uint16 code;
 

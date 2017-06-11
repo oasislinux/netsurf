@@ -18,7 +18,7 @@
 
 /**
  * \file
- * Implementation of win32 cookie manager.
+ * Implementation of win32 global history interface.
  */
 
 #include <stdint.h>
@@ -81,6 +81,8 @@ nsw32_global_history_mouse(struct nsw32_corewindow *nsw32_cw,
  * callback on draw event for global_history window
  *
  * \param nsw32_cw The nsw32 core window structure.
+ * \param scrollx The horizontal scroll offset.
+ * \param scrolly The vertical scroll offset.
  * \param r The rectangle of the window that needs updating.
  * \return NSERROR_OK on success otherwise apropriate error code
  */
@@ -124,7 +126,7 @@ static nserror nsw32_global_history_init(HINSTANCE hInstance)
 		return NSERROR_OK;
 	}
 
-	ncwin = malloc(sizeof(struct nsw32_global_history_window));
+	ncwin = calloc(1, sizeof(*ncwin));
 	if (ncwin == NULL) {
 		return NSERROR_NOMEM;
 	}

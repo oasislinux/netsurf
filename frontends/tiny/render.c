@@ -208,38 +208,33 @@ destroysizedata(void *object)
 	free(data);
 }
 
-static FT_Size
-lookupsize(const struct plot_font_style *style)
+static nserror
+lookupsize(const struct plot_font_style *style, FT_Size *size)
 {
 	FTC_ScalerRec scaler;
-	FT_Size size;
-	FT_Error err;
 	struct sizedata *data;
+	nserror err;
 
 	scaler.face_id = lookupface(style);
 	scaler.width = scaler.height = style->size * 64 / 1024;
 	scaler.pixel = 0;
 	scaler.x_res = scaler.y_res = browser_get_dpi();
 
-	err = FTC_Manager_LookupSize(manager, &scaler, &size);
-	if (err)
-		return NULL;
+	err = fterror(FTC_Manager_LookupSize(manager, &scaler, size));
+	if (err != NSERROR_OK)
+		return err;
 
-	if (!size->generic.data) {
+	if (!(*size)->generic.data) {
 		data = malloc(sizeof(*data));
 		if (!data)
-			return NULL;
-		data->glyphs = calloc(size->face->num_glyphs, sizeof(data->glyphs[0]));
+			return NSERROR_NOMEM;
+		data->glyphs = calloc((*size)->face->num_glyphs, sizeof(data->glyphs[0]));
 		data->faceid = scaler.face_id;
-		size->generic.data = data;
-		size->generic.finalizer = destroysizedata;
+		(*size)->generic.data = data;
+		(*size)->generic.finalizer = destroysizedata;
 	}
 
-	err = FT_Activate_Size(size);
-	if (err)
-		return NULL;
-
-	return size;
+	return fterror(FT_Activate_Size(*size));
 }
 
 static inline uint8_t flipbits(uint8_t b)
@@ -390,14 +385,14 @@ layout_width(const struct plot_font_style *style, const char *string, size_t len
 	struct glyph *glyph;
 	nserror err;
 
-	size = lookupsize(style);
-	if (!size)
-		return NSERROR_NOT_FOUND;
+	err = lookupsize(style, &size);
+	if (err != NSERROR_OK)
+		return err;
 	*width = 0;
 	while (length) {
 		c = utf8_to_ucs4(string, length);
 		err = lookupglyph(size, c, &glyph, NULL);
-		if (err)
+		if (err != NSERROR_OK)
 			return err;
 		*width += glyph->advance.x >> 6;
 		n = utf8_next(string, length, 0);
@@ -419,15 +414,15 @@ layout_position(const struct plot_font_style *style, const char *string, size_t 
 	int dx;
 	nserror err;
 
-	size = lookupsize(style);
-	if (!size)
-		return NSERROR_NOT_FOUND;
+	err = lookupsize(style, &size);
+	if (err != NSERROR_OK)
+		return err;
 	dx = x;
 	for (s = string; length; s += n, length -= n) {
 		c = utf8_to_ucs4(s, length);
 		n = utf8_next(s, length, 0);
 		err = lookupglyph(size, c, &glyph, NULL);
-		if (err)
+		if (err != NSERROR_OK)
 			return err;
 		if (dx < glyph->advance.x >> 7)
 			break;
@@ -448,10 +443,11 @@ layout_split(const struct plot_font_style *style, const char *string, size_t len
 	size_t n;
 	struct glyph *glyph;
 	int width = 0, splitidx = 0, splitx;
+	nserror err;
 
-	size = lookupsize(style);
-	if (!size)
-		return NSERROR_NOT_FOUND;
+	err = lookupsize(style, &size);
+	if (err != NSERROR_OK)
+		return err;
 	for (s = string; length; s += n, length -=n) {
 		c = utf8_to_ucs4(s, length);
 		n = utf8_next(s, length, 0);
@@ -596,60 +592,67 @@ static struct gui_bitmap_table bitmap_table = {
 struct gui_bitmap_table *tiny_bitmap_table = &bitmap_table;
 
 /* plotters */
-static bool
+static nserror
 plotoutline(FT_Outline *outline, colour c)
 {
 	pixman_color_t color = PIXMAN_COLOR(c);
 	pixman_image_t *image, *solid;
 	int x, y, w, h;
+	nserror err = NSERROR_OK;
 
-	if (outlineimage(outline, &x, &y, &image) != NSERROR_OK)
-		goto err0;
+	err = outlineimage(outline, &x, &y, &image);
+	if (err != NSERROR_OK)
+		goto err;
 	w = pixman_image_get_width(image);
 	h = pixman_image_get_height(image);
 
 	solid = pixman_image_create_solid_fill(&color);
-	if (!solid)
-		goto err1;
+	if (!solid) {
+		err = NSERROR_NOMEM;
+		goto err;
+	}
 	pixman_image_composite32(PIXMAN_OP_OVER, solid, image, target, 0, 0, 0, 0, -x, -y, w, h);
-	pixman_image_unref(image);
-	pixman_image_unref(solid);
 
-	return true;
+err:
+	if (image)
+		pixman_image_unref(image);
+	if (solid)
+		pixman_image_unref(solid);
 
-err1:
-	pixman_image_unref(image);
-err0:
-	return false;
+	return err;
 }
 
-static bool
-plot_clip(const struct rect *clip)
+// TODO: utilize redraw_context
+
+static nserror
+plot_clip(const struct redraw_context *ctx, const struct rect *clip)
 {
 	pixman_region32_t region;
 	pixman_box32_t box;
+	bool success;
 
-	if (!clip) {
+	if (clip) {
+		curclip = *clip;
+		box = (pixman_box32_t){clip->x0, clip->y0, clip->x1, clip->y1};
+		pixman_region32_init_with_extents(&region, &box);
+		success = pixman_image_set_clip_region32(target, &region);
+	} else {
 		curclip = (struct rect){INT_MIN, INT_MIN, INT_MAX, INT_MAX};
-		return pixman_image_set_clip_region32(target, NULL);
+		success = pixman_image_set_clip_region32(target, NULL);
 	}
 
-	curclip = *clip;
-	box = (pixman_box32_t){clip->x0, clip->y0, clip->x1, clip->y1};
-	pixman_region32_init_with_extents(&region, &box);
-
-	return pixman_image_set_clip_region32(target, &region);
+	return success ? NSERROR_OK : NSERROR_NOMEM;
 }
 
-static bool
-plot_arc(int x, int y, int radius, int angle1, int angle2, const plot_style_t *style)
+static nserror
+plot_arc(const struct redraw_context *ctx, const plot_style_t *style, int x, int y, int radius, int angle1, int angle2)
 {
 	LOG("plot_arc");
-	return true;
+	return NSERROR_NOT_IMPLEMENTED;
 }
 
-static bool
-plot_disc(int x, int y, int r, const plot_style_t *style)
+static nserror
+plot_disc(const struct redraw_context *ctx, const plot_style_t *style, int x, int y, int r)
 {
 	x <<= 6;
 	y <<= 6;
@@ -684,10 +687,16 @@ plot_disc(int x, int y, int r, const plot_style_t *style)
 	return plotoutline(&outline, style->fill_colour);
 }
 
-static bool
-plot_line(int x0, int y0, int x1, int y1, const plot_style_t *style)
+static nserror
+plot_line(const struct redraw_context *ctx, const plot_style_t *style, const struct rect *r)
 {
-	int sw = max(style->stroke_width, 1);
+	int x0, y0, x1, y1, sw;
+
+	x0 = r->x0;
+	y0 = r->y0;
+	x1 = r->x1;
+	y1 = r->y1;
+	sw = max(style->stroke_width, 1);
 
 	// TODO: handled non-solid lines
 
@@ -707,7 +716,7 @@ plot_line(int x0, int y0, int x1, int y1, const plot_style_t *style)
 		if (curclip.y1 < box.y2)
 			box.y2 = max(box.y1, curclip.y1);
 		if (box.x1 == box.x2 && box.y1 == box.y2)
-			return true;
+			return NSERROR_OK;
 
 		if (x0 == x1) {
 			box.x1 -= sw / 2;
@@ -717,7 +726,12 @@ plot_line(int x0, int y0, int x1, int y1, const plot_style_t *style)
 			box.y2 += (sw + 1) / 2;
 		}
 
-		return pixman_image_fill_boxes(PIXMAN_OP_SRC, target, &fill_color, 1, &box);
+		if (!pixman_image_fill_boxes(PIXMAN_OP_SRC, target, &fill_color, 1, &box)) {
+			/* TODO: could also return false if rectangle doesn't intersect clip */
+			return NSERROR_NOMEM;
+		}
+
+		return NSERROR_OK;
 	} else {
 		x0 <<= 6;
 		y0 <<= 6;
@@ -748,30 +762,44 @@ plot_line(int x0, int y0, int x1, int y1, const plot_style_t *style)
 	}
 }
 
-static bool
-plot_rectangle(int x0, int y0, int x1, int y1, const plot_style_t *style)
+static nserror
+plot_rectangle(const struct redraw_context *ctx, const plot_style_t *style, const struct rect *r)
 {
 	pixman_color_t fill_color = PIXMAN_COLOR(style->fill_colour);
-	pixman_box32_t box = {min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)};
-	return pixman_image_fill_boxes(PIXMAN_OP_SRC, target, &fill_color, 1, &box);
+	pixman_box32_t box = {
+		min(r->x0, r->x1), min(r->y0, r->y1),
+		max(r->x0, r->x1), max(r->y0, r->y1),
+	};
+
+	if (!pixman_image_fill_boxes(PIXMAN_OP_SRC, target, &fill_color, 1, &box)) {
+		/* TODO: could also return false if rectangle doesn't intersect clip */
+		return NSERROR_NOMEM;
+	}
+
+	return NSERROR_OK;
 }
 
-static bool
-plot_polygon(const int *p, unsigned int n, const plot_style_t *style)
+static nserror
+plot_polygon(const struct redraw_context *ctx, const plot_style_t *style, const int *p, unsigned int n)
 {
 	FT_Outline outline;
 	FT_Vector *v;
 	short contour = n - 1;
+	nserror err = NSERROR_OK;
 
 	outline.n_contours = 1;
 	outline.n_points = n;
 	outline.contours = &contour;
 	outline.points = reallocarray(NULL, n, sizeof(outline.points[0]));
-	if (!outline.points)
+	if (!outline.points) {
+		err = NSERROR_NOMEM;
 		goto err0;
+	}
 	outline.tags = malloc(n);
-	if (!outline.tags)
+	if (!outline.tags) {
+		err = NSERROR_NOMEM;
 		goto err1;
+	}
 	memset(outline.tags, 1, n);
 	outline.flags = FT_OUTLINE_OWNER;
 
@@ -780,31 +808,24 @@ plot_polygon(const int *p, unsigned int n, const plot_style_t *style)
 		v->y = -p[1] << 6;
 	}
 
-	if (!plotoutline(&outline, style->fill_colour))
-		goto err2;
+	err = plotoutline(&outline, style->fill_colour);
 
-	free(outline.tags);
-	free(outline.points);
-
-	return true;
-
-err2:
 	free(outline.tags);
 err1:
 	free(outline.points);
 err0:
-	return false;
+	return err;
 }
 
-static bool
-plot_path(const float *p, unsigned int n, colour fill, float width, colour c, const float transform[6])
+static nserror
+plot_path(const struct redraw_context *ctx, const plot_style_t *style, const float *p, unsigned int n, float width, const float transform[6])
 {
 	LOG("plot_path\n");
-	return false;
+	return NSERROR_NOT_IMPLEMENTED;
 }
 
-static bool
-plot_bitmap(int x, int y, int w, int h, struct bitmap *bitmap, colour bg, bitmap_flags_t flags)
+static nserror
+plot_bitmap(const struct redraw_context *ctx, struct bitmap *bitmap, int x, int y, int w, int h, colour bg, bitmap_flags_t flags)
 {
 	struct pixman_transform transform;
 	pixman_image_t *image = (void *)bitmap;
@@ -842,11 +863,11 @@ plot_bitmap(int x, int y, int w, int h, struct bitmap *bitmap, colour bg, bitmap
 	 * the mask here so that the bitmap alpha component gets multiplied with
 	 * the bitmap color components. */
 	pixman_image_composite32(PIXMAN_OP_OVER, image, image, target, srcx, srcy, srcx, srcy, x, y, w, h);
-	return true;
+	return NSERROR_OK;
 }
 
-static bool
-plot_text(int x, int y, const char *text, size_t length, const struct plot_font_style *style)
+static nserror
+plot_text(const struct redraw_context *ctx, const struct plot_font_style *style, int x, int y, const char *text, size_t length)
 {
 	FT_Size size;
 	struct glyph *glyph;
@@ -858,19 +879,21 @@ plot_text(int x, int y, const char *text, size_t length, const struct plot_font_
 	pixman_image_t *solid;
 	const void *entry;
 	pixman_color_t color = PIXMAN_COLOR(style->foreground);
+	nserror err;
 
 	if (!length)
-		return true;
-	size = lookupsize(style);
-	if (!size)
-		return false;
+		return NSERROR_OK;
+	err = lookupsize(style, &size);
+	if (err != NSERROR_OK)
+		return err;
 	nglyphs = utf8_bounded_length(text, length);
 	glyphs = reallocarray(NULL, nglyphs, sizeof(*glyph));
 	for (i = 0; length; ++i) {
 		c = utf8_to_ucs4(text, length);
 		n = utf8_next(text, length, 0);
-		if (lookupglyph(size, c, &glyph, &entry) != NSERROR_OK)
-			return false;
+		err = lookupglyph(size, c, &glyph, &entry);
+		if (err != NSERROR_OK)
+			return err;
 		glyphs[i].x = dx;
 		glyphs[i].y = dy;
 		glyphs[i].glyph = entry;
@@ -881,13 +904,13 @@ plot_text(int x, int y, const char *text, size_t length, const struct plot_font_
 	solid = pixman_image_create_solid_fill(&color);
 	if (!solid) {
 		free(glyphs);
-		return false;
+		return NSERROR_NOMEM;
 	}
 	pixman_composite_glyphs_no_mask(PIXMAN_OP_OVER, solid, target, 0, 0, x, y, glyphcache, nglyphs, glyphs);
 	pixman_image_unref(solid);
 	free(glyphs);
 
-	return true;
+	return NSERROR_OK;
 }
 
 static const struct plotter_table plotter_table = {

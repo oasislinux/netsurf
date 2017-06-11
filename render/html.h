@@ -30,10 +30,10 @@
 #include <dom/dom.h>
 #include <dom/bindings/hubbub/parser.h>
 
+#include "netsurf/types.h"
 #include "netsurf/content_type.h"
 #include "netsurf/browser_window.h"
 #include "netsurf/mouse.h"
-#include "desktop/plot_style.h"
 #include "desktop/frame_types.h"
 
 struct fetch_multipart_data;
@@ -52,6 +52,7 @@ struct scrollbar_msg_data;
 struct search_context;
 struct selection;
 struct nsurl;
+struct plot_font_style;
 
 /**
  * Container for stylesheets used by an HTML document
@@ -87,7 +88,7 @@ struct html_script {
 };
 
 
-/** An object (<img>, <object>, etc.) in a CONTENT_HTML document. */
+/** An object (img, object, etc. tag) in a CONTENT_HTML document. */
 struct content_html_object {
 	struct content *parent;		/**< Parent document */
 	struct content_html_object *next; /**< Next in chain */
@@ -104,7 +105,7 @@ struct html_scrollbar_data {
 	struct box *box;
 };
 
-/** Frame tree (<frameset>, <frame>) */
+/** Frame tree (frameset or frame tag) */
 struct content_html_frames {
 	int cols;	/** number of columns in frameset */
 	int rows;	/** number of rows in frameset */
@@ -125,7 +126,7 @@ struct content_html_frames {
 	struct content_html_frames *children; /** [cols * rows] children */
 };
 
-/** Inline frame list (<iframe>) */
+/** Inline frame list (iframe tag) */
 struct content_html_iframe {
   	struct box *box;
 
@@ -158,7 +159,7 @@ void html_overflow_scroll_drag_end(struct scrollbar *scrollbar,
 
 bool text_redraw(const char *utf8_text, size_t utf8_len,
 		size_t offset, int space,
-		const plot_font_style_t *fstyle,
+		const struct plot_font_style *fstyle,
 		int x, int y,
 		const struct rect *clip,
 		int height,

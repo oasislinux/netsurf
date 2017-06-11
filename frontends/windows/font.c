@@ -19,54 +19,76 @@
 
 /**
  * \file
- * Windows font handling implementation.
+ * Windows font handling and character encoding implementation.
  */
 
 #include "utils/config.h"
-#include <inttypes.h>
 #include <assert.h>
 #include <windows.h>
 
+#include "netsurf/inttypes.h"
 #include "utils/log.h"
 #include "utils/nsoption.h"
 #include "utils/utf8.h"
 #include "netsurf/layout.h"
 #include "netsurf/utf8.h"
+#include "netsurf/plot_style.h"
 
 #include "windows/font.h"
 
 HWND font_hwnd;
 
-nserror utf8_to_font_encoding(const struct font_desc* font,
-				       const char *string,
-				       size_t len,
-				       char **result)
+/* exported interface documented in windows/font.h */
+nserror
+utf8_to_font_encoding(const struct font_desc* font,
+		      const char *string,
+		      size_t len,
+		      char **result)
 {
 	return utf8_to_enc(string, font->encoding, len, result);
 }
 
-static nserror utf8_to_local_encoding(const char *string,
-				       size_t len,
-				       char **result)
+
+/**
+ * Convert a string to UCS2 from UTF8
+ *
+ * \param[in] string source string
+ * \param[in] len source string length
+ * \param[out] result The UCS2 string
+ */
+static nserror
+utf8_to_local_encoding(const char *string, size_t len, char **result)
 {
 	return utf8_to_enc(string, "UCS-2", len, result);
 }
 
-static nserror utf8_from_local_encoding(const char *string, size_t len,
-		char **result)
+
+/**
+ * Convert a string to UTF8 from local encoding
+ *
+ * \param[in] string source string
+ * \param[in] len source string length
+ * \param[out] result The UTF8 string
+ */
+static nserror
+utf8_from_local_encoding(const char *string, size_t len, char **result)
 {
 	assert(string && result);
 
-	if (len == 0)
+	if (len == 0) {
 		len = strlen(string);
+	}
 
 	*result = strndup(string, len);
-	if (!(*result))
+	if (!(*result)) {
 		return NSERROR_NOMEM;
+	}
 
 	return NSERROR_OK;
 }
 
+
+/* exported interface documented in windows/font.h */
 HFONT get_font(const plot_font_style_t *style)
 {
 	char *face = NULL;
@@ -121,15 +143,17 @@ HFONT get_font(const plot_font_style_t *style)
 		free(face);
 
 	if (font == NULL) {
-		if (style->family == PLOT_FONT_FAMILY_MONOSPACE)
+		if (style->family == PLOT_FONT_FAMILY_MONOSPACE) {
 			font = (HFONT) GetStockObject(ANSI_FIXED_FONT);
-		else
+		} else {
 			font = (HFONT) GetStockObject(ANSI_VAR_FONT);
+		}
 	}
 	if (font == NULL)
 		font = (HFONT) GetStockObject(SYSTEM_FONT);
 	return font;
 }
+
 
 /**
  * Measure the width of a string.
@@ -138,19 +162,19 @@ HFONT get_font(const plot_font_style_t *style)
  * \param[in] string UTF-8 string to measure
  * \param[in] length length of string, in bytes
  * \param[out] width updated to width of string[0..length)
- * \return true on success and width updated else false
+ * \return NSERROR_OK on success otherwise appropriate error code
  */
 static nserror
 win32_font_width(const plot_font_style_t *style,
-	     const char *string,
-	     size_t length,
-	     int *width)
+		 const char *string,
+		 size_t length,
+		 int *width)
 {
 	HDC hdc;
 	HFONT font;
 	HFONT fontbak;
 	SIZE s;
-	bool ret = true;
+	nserror ret = NSERROR_OK;
 
 	if (length == 0) {
 		*width = 0;
@@ -163,7 +187,7 @@ win32_font_width(const plot_font_style_t *style,
 		if (GetTextExtentPoint32A(hdc, string, length, &s) != 0) {
 			*width = s.cx;
 		} else {
-			ret = false;
+			ret = NSERROR_UNKNOWN;
 		}
 		font = SelectObject(hdc, fontbak);
 		DeleteObject(font);
@@ -183,22 +207,22 @@ win32_font_width(const plot_font_style_t *style,
  * \param  x		x coordinate to search for
  * \param  char_offset	updated to offset in string of actual_x, [0..length]
  * \param  actual_x	updated to x coordinate of character closest to x
- * \return  true on success, false on error and error reported
+ * \return NSERROR_OK on success otherwise appropriate error code
  */
 static nserror
 win32_font_position(const plot_font_style_t *style,
-			  const char *string,
-			  size_t length,
-			  int x,
-			  size_t *char_offset,
-			  int *actual_x)
+		    const char *string,
+		    size_t length,
+		    int x,
+		    size_t *char_offset,
+		    int *actual_x)
 {
 	HDC hdc;
 	HFONT font;
 	HFONT fontbak;
 	SIZE s;
 	int offset;
-	bool ret = true;
+	nserror ret = NSERROR_OK;
 
 	if ((length == 0) || (x < 1)) {
 		*char_offset = 0;
@@ -210,10 +234,10 @@ win32_font_position(const plot_font_style_t *style,
 
 		if ((GetTextExtentExPointA(hdc, string, length, x, &offset, NULL,&s) != 0) &&
 		    (GetTextExtentPoint32A(hdc, string, offset, &s) != 0)) {
-				*char_offset = (size_t)offset;
-				*actual_x = s.cx;
+			*char_offset = (size_t)offset;
+			*actual_x = s.cx;
 		} else {
-			ret = false;
+			ret = NSERROR_UNKNOWN;
 		}
 		font = SelectObject(hdc, fontbak);
 		DeleteObject(font);
@@ -234,7 +258,7 @@ win32_font_position(const plot_font_style_t *style,
  * \param  x		width available
  * \param  char_offset	updated to offset in string of actual_x, [0..length]
  * \param  actual_x	updated to x coordinate of character closest to x
- * \return  true on success, false on error and error reported
+ * \return NSERROR_OK on success otherwise appropriate error code
  *
  * On exit, [char_offset == 0 ||
  *	   string[char_offset] == ' ' ||
@@ -242,20 +266,26 @@ win32_font_position(const plot_font_style_t *style,
  */
 static nserror
 win32_font_split(const plot_font_style_t *style,
-	     const char *string,
-	     size_t length,
-	     int x,
-	     size_t *char_offset,
-	     int *actual_x)
+		 const char *string,
+		 size_t length,
+		 int x,
+		 size_t *char_offset,
+		 int *actual_x)
 {
 	int c_off;
-	bool ret = false;
+	nserror ret = NSERROR_UNKNOWN;
 
-	if (win32_font_position(style, string, length, x, char_offset, actual_x)) {
+	if (win32_font_position(style,
+				string,
+				length,
+				x,
+				char_offset,
+				actual_x)) {
 		c_off = *char_offset;
 		if (*char_offset == length) {
-			ret = true;
+			ret = NSERROR_OK;
 		} else {
+			bool success;
 			while ((string[*char_offset] != ' ') &&
 			       (*char_offset > 0)) {
 				(*char_offset)--;
@@ -269,18 +299,25 @@ win32_font_split(const plot_font_style_t *style,
 				}
 			}
 
-			ret = win32_font_width(style, string, *char_offset, actual_x);
+			success = win32_font_width(style,
+						   string,
+						   *char_offset,
+						   actual_x);
+			if (success) {
+				ret = NSERROR_OK;
+			}
 		}
 	}
 
 /*
-	LOG("ret %d Split %u chars at %ipx: Split at char %i (%ipx) - %.*s",
-	    ret, length, x, *char_offset, *actual_x, *char_offset, string);
+  LOG("ret %d Split %u chars at %ipx: Split at char %i (%ipx) - %.*s",
+  ret, length, x, *char_offset, *actual_x, *char_offset, string);
 */
 	return ret;
 }
 
 
+/** win32 font operations table */
 static struct gui_layout_table layout_table = {
 	.width = win32_font_width,
 	.position = win32_font_position,
@@ -289,7 +326,7 @@ static struct gui_layout_table layout_table = {
 
 struct gui_layout_table *win32_layout_table = &layout_table;
 
-
+/** win32 utf8 encoding operations table */
 static struct gui_utf8_table utf8_table = {
 	.utf8_to_local = utf8_to_local_encoding,
 	.local_to_utf8 = utf8_from_local_encoding,

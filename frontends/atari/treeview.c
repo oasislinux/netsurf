@@ -16,13 +16,13 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <inttypes.h>
 #include <sys/types.h>
 #include <string.h>
 
 #include "assert.h"
 #include "cflib.h"
 
+#include "netsurf/inttypes.h"
 #include "utils/nsoption.h"
 #include "utils/log.h"
 #include "utils/messages.h"
@@ -44,8 +44,7 @@
  * Declare Core Window Callbacks:
  */
 
-void atari_treeview_redraw_request(struct core_window *cw,
-								const struct rect *r);
+nserror atari_treeview_invalidate_area(struct core_window *cw, const struct rect *r);
 void atari_treeview_update_size(struct core_window *cw, int width, int height);
 void atari_treeview_scroll_visible(struct core_window *cw,
 								const struct rect *r);
@@ -56,7 +55,7 @@ void atari_treeview_drag_status(struct core_window *cw,
 		core_window_drag_status ds);
 
 static struct core_window_callback_table cw_t = {
-	.redraw_request = atari_treeview_redraw_request,
+	.invalidate = atari_treeview_invalidate_area,
 	.update_size = atari_treeview_update_size,
 	.scroll_visible = atari_treeview_scroll_visible,
 	.get_window_dimensions = atari_treeview_get_window_dimensions,
@@ -223,7 +222,11 @@ void atari_treeview_redraw(struct core_window *cw)
 				.background_images = true,
 				.plot = &atari_plotters
 			};
-			plot_set_dimensions(work.g_x, work.g_y, work.g_w, work.g_h);
+			plot_set_dimensions(&ctx,
+					    work.g_x,
+					    work.g_y,
+					    work.g_w,
+					    work.g_h);
 			if (plot_lock() == false)
 				return;
 
@@ -366,11 +369,11 @@ static void __CDECL on_keybd_event(struct core_window *cw, EVMULT_OUT *ev_out,
 }
 
 
-static void __CDECL on_redraw_event(struct core_window *cw, EVMULT_OUT *ev_out,
-									short msg[8])
+static void __CDECL on_redraw_event(struct core_window *cw,
+				    EVMULT_OUT *ev_out,
+				    short msg[8])
 {
 	GRECT work, clip;
-	struct gemtk_wm_scroll_info_s *slid;
 	struct atari_treeview_window *tv = (struct atari_treeview_window *)cw;
 
 	if (tv == NULL)
@@ -381,7 +384,7 @@ static void __CDECL on_redraw_event(struct core_window *cw, EVMULT_OUT *ev_out,
 
 	atari_treeview_get_grect(cw, TREEVIEW_AREA_CONTENT, &work);
 	//dbg_grect("treeview work: ", &work);
-	slid = gemtk_wm_get_scroll_info(tv->window);
+	gemtk_wm_get_scroll_info(tv->window);
 
 	clip = work;
 
@@ -390,10 +393,10 @@ static void __CDECL on_redraw_event(struct core_window *cw, EVMULT_OUT *ev_out,
 		return;
 	}
 
-    if (atari_treeview_is_iconified(cw) == true) {
-        atari_treeview_redraw_icon(cw, &clip);
-        return;
-    }
+	if (atari_treeview_is_iconified(cw) == true) {
+		atari_treeview_redraw_icon(cw, &clip);
+		return;
+	}
 
 	/* make redraw coords relative to content viewport */
 	clip.g_x -= work.g_x;
@@ -425,8 +428,9 @@ static void __CDECL on_redraw_event(struct core_window *cw, EVMULT_OUT *ev_out,
 	}
 }
 
-static void __CDECL on_mbutton_event(struct core_window *cw, EVMULT_OUT *ev_out,
-									short msg[8])
+static void __CDECL on_mbutton_event(struct core_window *cw,
+				     EVMULT_OUT *ev_out,
+				     short msg[8])
 {
 	struct atari_treeview_window *tv = (struct atari_treeview_window *)cw;
 	struct gemtk_wm_scroll_info_s *slid;
@@ -650,32 +654,43 @@ void atari_treeview_close(struct core_window *cw)
  */
 
 /**
- * Request a redraw of the window
+ * callback from core to request an invalidation of a window area.
  *
- * \param cw		the core window object
- * \param r		rectangle to redraw
+ * The specified area of the window should now be considered
+ *  out of date. If the area is NULL the entire window must be
+ *  invalidated.
+ *
+ * \param[in] cw The core window to invalidate.
+ * \param[in] r area to redraw or NULL for the entire window area.
+ * \return NSERROR_OK on success or appropriate error code.
  */
-void atari_treeview_redraw_request(struct core_window *cw, const struct rect *r)
+nserror atari_treeview_invalidate_area(struct core_window *cw, const struct rect *r)
 {
 	GRECT area;
 	struct gemtk_wm_scroll_info_s * slid;
 	struct atari_treeview_window * tv = (struct atari_treeview_window *)cw;
 
-	RECT_TO_GRECT(r, &area)
-
 	assert(tv);
 
-	slid = gemtk_wm_get_scroll_info(tv->window);
+	if (r != NULL) {
+		RECT_TO_GRECT(r, &area);
 
-	//dbg_rect("redraw rect request", r);
+		slid = gemtk_wm_get_scroll_info(tv->window);
 
-	// treeview redraw is always full window width:
-	area.g_x = 0;
-	area.g_w = 8000;
-	// but vertical redraw region is clipped:
-	area.g_y = r->y0 - (slid->y_pos*slid->y_unit_px);
-	area.g_h = r->y1 - r->y0;
+		//dbg_rect("redraw rect request", r);
+
+		// treeview redraw is always full window width:
+		area.g_x = 0;
+		area.g_w = 8000;
+		// but vertical redraw region is clipped:
+		area.g_y = r->y0 - (slid->y_pos*slid->y_unit_px);
+		area.g_h = r->y1 - r->y0;
+	} else {
+		atari_treeview_get_grect(cw, TREEVIEW_AREA_CONTENT, &area);
+	}
 	atari_treeview_redraw_grect_request(cw, &area);
+
+	return NSERROR_OK;
 }
 
 /**

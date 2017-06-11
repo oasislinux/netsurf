@@ -31,9 +31,10 @@
 extern struct gui_bitmap_table *amiga_bitmap_table;
 struct bitmap;
 struct nsurl;
+struct gui_globals;
 
 struct BitMap *ami_bitmap_get_native(struct bitmap *bitmap,
-				int width, int height, struct BitMap *friendbm);
+				int width, int height, bool palette_mapped, struct BitMap *friendbm);
 PLANEPTR ami_bitmap_get_mask(struct bitmap *bitmap, int width,
 				int height, struct BitMap *n_bm);
 
@@ -63,16 +64,6 @@ void ami_bitmap_set_url(struct bitmap *bm, struct nsurl *url);
 void ami_bitmap_set_title(struct bitmap *bm, const char *title);
 
 /**
- * Get an icondata pointer
- *
- * \param  bm  a bitmap, as returned by bitmap_create()
- * \return pointer to the icondata area
- *
- * This function probably shouldn't be here!
- */
-ULONG *ami_bitmap_get_icondata(struct bitmap *bm);
-
-/**
  * Set an icondata pointer
  *
  * \param  bm  a bitmap, as returned by bitmap_create()
@@ -81,6 +72,15 @@ ULONG *ami_bitmap_get_icondata(struct bitmap *bm);
  * This function probably shouldn't be here!
  */
 void ami_bitmap_set_icondata(struct bitmap *bm, ULONG *icondata);
+
+/**
+ * Free an icondata pointer
+ *
+ * \param bm a bitmap, as returned by bitmap_create()
+ *
+ * This function probably shouldn't be here!
+ */
+void ami_bitmap_free_icondata(struct bitmap *bm);
 
 /**
  * Test if a BitMap is owned by a bitmap.

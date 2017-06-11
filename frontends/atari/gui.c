@@ -39,6 +39,7 @@
 #include "netsurf/content.h"
 #include "netsurf/cookie_db.h"
 #include "netsurf/url_db.h"
+#include "netsurf/plotters.h"
 #include "content/backing_store.h"
 
 #include "atari/gemtk/gemtk.h"
@@ -292,25 +293,27 @@ void gui_window_destroy(struct gui_window *gw)
 }
 
 /**
- * Find the current dimensions of a browser window's content area.
+ * Find the current dimensions of a atari browser window content area.
  *
- * \param w	 gui_window to measure
- * \param width	 receives width of window
+ * \param gw The gui window to measure content area of.
+ * \param width receives width of window
  * \param height receives height of window
  * \param scaled whether to return scaled values
+ * \return NSERROR_OK on sucess and width and height updated
+ *          else error code.
  */
-static void
-gui_window_get_dimensions(struct gui_window *w,
+static nserror
+gui_window_get_dimensions(struct gui_window *gw,
 			  int *width,
 			  int *height,
 			  bool scaled)
 {
-    if (w == NULL)
-	return;
     GRECT rect;
-    window_get_grect(w->root, BROWSER_AREA_CONTENT, &rect);
+    window_get_grect(gw->root, BROWSER_AREA_CONTENT, &rect);
     *width = rect.g_w;
     *height = rect.g_h;
+
+    return NSERROR_OK;
 }
 
 /**
@@ -374,44 +377,41 @@ void atari_window_set_status(struct gui_window *w, const char *text)
 	window_set_stauts(w->root, (char*)text);
 }
 
-static void atari_window_reformat(struct gui_window *gw)
-{
-    int width = 0, height = 0;
 
-    if (gw != NULL) {
-	gui_window_get_dimensions(gw, &width, &height, true);
-	browser_window_reformat(gw->browser->bw, false, width, height);
-    }
-}
-
-static void gui_window_redraw_window(struct gui_window *gw)
-{
-    CMP_BROWSER b;
-    GRECT rect;
-    if (gw == NULL)
-	return;
-    b = gw->browser;
-    window_get_grect(gw->root, BROWSER_AREA_CONTENT, &rect);
-    window_schedule_redraw_grect(gw->root, &rect);
-}
-
-static void gui_window_update_box(struct gui_window *gw, const struct rect *rect)
+/**
+ * Invalidates an area of an atari browser window
+ *
+ * \param gw gui_window
+ * \param rect area to redraw or NULL for the entire window area
+ * \return NSERROR_OK on success or appropriate error code
+ */
+static nserror
+atari_window_invalidate_area(struct gui_window *gw,
+			     const struct rect *rect)
 {
     GRECT area;
-    struct gemtk_wm_scroll_info_s *slid;
 
-    if (gw == NULL)
-	return;
-
-    slid = gemtk_wm_get_scroll_info(gw->root->win);
+    if (gw == NULL) {
+	return NSERROR_BAD_PARAMETER;
+    }
 
     window_get_grect(gw->root, BROWSER_AREA_CONTENT, &area);
-    area.g_x += rect->x0 - (slid->x_pos * slid->x_unit_px);
-    area.g_y += rect->y0 - (slid->y_pos * slid->y_unit_px);
-    area.g_w = rect->x1 - rect->x0;
-    area.g_h = rect->y1 - rect->y0;
+
+    if (rect != NULL) {
+	    struct gemtk_wm_scroll_info_s *slid;
+
+	    slid = gemtk_wm_get_scroll_info(gw->root->win);
+
+	    area.g_x += rect->x0 - (slid->x_pos * slid->x_unit_px);
+	    area.g_y += rect->y0 - (slid->y_pos * slid->y_unit_px);
+	    area.g_w = rect->x1 - rect->x0;
+	    area.g_h = rect->y1 - rect->y0;
+    }
+
     //dbg_grect("update box", &area);
     window_schedule_redraw_grect(gw->root, &area);
+
+    return NSERROR_OK;
 }
 
 bool gui_window_get_scroll(struct gui_window *w, int *sx, int *sy)
@@ -424,17 +424,30 @@ bool gui_window_get_scroll(struct gui_window *w, int *sx, int *sy)
     return( true );
 }
 
-static void gui_window_set_scroll(struct gui_window *w, int sx, int sy)
+/**
+ * Set the scroll position of a atari browser window.
+ *
+ * Scrolls the viewport to ensure the specified rectangle of the
+ *   content is shown. The atari implementation scrolls the contents so
+ *   the specified point in the content is at the top of the viewport.
+ *
+ * \param gw gui window to scroll
+ * \param rect The rectangle to ensure is shown.
+ * \return NSERROR_OK on success or apropriate error code.
+ */
+static nserror
+gui_window_set_scroll(struct gui_window *gw, const struct rect *rect)
 {
-    if (   (w == NULL)
-	   || (w->browser->bw == NULL)
-	   || (!browser_window_has_content(w->browser->bw)))
-	return;
+    if ((gw == NULL) ||
+	(gw->browser->bw == NULL) ||
+	(!browser_window_has_content(gw->browser->bw))) {
+	return NSERROR_BAD_PARAMETER;
+    }
 
-    LOG("scroll (gui_window: %p) %d, %d\n", w, sx, sy);
-    window_scroll_by(w->root, sx, sy);
-    return;
+    LOG("scroll (gui_window: %p) %d, %d\n", gw, rect->x0, rect->y0);
+    window_scroll_by(gw->root, rect->x0, rect->y0);
 
+    return NSERROR_OK;
 }
 
 /**
@@ -679,7 +692,7 @@ static void gui_window_new_content(struct gui_window *w)
     slid->x_pos = 0;
     slid->y_pos = 0;
     gemtk_wm_update_slider(w->root->win, GEMTK_WM_VH_SLIDER);
-    gui_window_redraw_window(w);
+    atari_window_invalidate_area(w, NULL);
 }
 
 
@@ -1019,7 +1032,12 @@ static void gui_init(int argc, char** argv)
     nkc_init();
 
     LOG("Initializing plotters...");
-    plot_init(nsoption_charp(atari_font_driver));
+    struct redraw_context ctx = {
+	    .interactive = true,
+	    .background_images = true,
+	    .plot = &atari_plotters
+    };
+    plot_init(&ctx, nsoption_charp(atari_font_driver));
 
     aes_event_in.emi_m1leave = MO_LEAVE;
     aes_event_in.emi_m1.g_w = 1;
@@ -1045,13 +1063,11 @@ static void gui_init(int argc, char** argv)
 static struct gui_window_table atari_window_table = {
     .create = gui_window_create,
     .destroy = gui_window_destroy,
-    .redraw = gui_window_redraw_window,
-    .update = gui_window_update_box,
+    .invalidate = atari_window_invalidate_area,
     .get_scroll = gui_window_get_scroll,
     .set_scroll = gui_window_set_scroll,
     .get_dimensions = gui_window_get_dimensions,
     .update_extent = gui_window_update_extent,
-    .reformat = atari_window_reformat,
 
     .set_title = gui_window_set_title,
     .set_url = gui_window_set_url,

@@ -16,7 +16,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/** \file
+/**
+ * \file
  * Content for image/x-amiga-icon (icon.library implementation).
  *
  */
@@ -49,7 +50,6 @@
 #include "amiga/os3support.h"
 #include "amiga/bitmap.h"
 #include "amiga/icon.h"
-#include "amiga/misc.h"
 
 #define THUMBNAIL_WIDTH 100 /* Icon sizes for thumbnails, usually the same as */
 #define THUMBNAIL_HEIGHT 86 /* WIDTH/HEIGHT in desktop/thumbnail.c */
@@ -239,7 +239,7 @@ bool amiga_icon_convert(struct content *c)
 	if(dobj) FreeDiskObject(dobj);
 
 	if(format==IDFMT_PALETTEMAPPED)
-		FreeVec(imagebufptr);
+		free(imagebufptr);
 
 	return true;
 }
@@ -274,8 +274,14 @@ bool amiga_icon_redraw(struct content *c,
 	if (data->repeat_y)
 		flags |= BITMAPF_REPEAT_Y;
 
-	return ctx->plot->bitmap(data->x, data->y, data->width, data->height,
-			icon_c->bitmap, data->background_colour, flags);
+	return (ctx->plot->bitmap(ctx,
+				  icon_c->bitmap,
+				  data->x,
+				  data->y,
+				  data->width,
+				  data->height,
+				  data->background_colour,
+				  flags) == NSERROR_OK);
 }
 
 
@@ -326,11 +332,14 @@ static ULONG *amiga_icon_convertcolouricon32(UBYTE *icondata, ULONG width, ULONG
 
 	if (alpha==0) alpha=0xff;
 
-	argbicon = (ULONG *)AllocVecTagList(width*height*4, NULL);
+	argbicon = (ULONG *)malloc(width * height * 4);
 	if (!argbicon) return(NULL);
 
 	cmap=GetColorMap(pals1);
-	if(!cmap) return(NULL);
+	if(!cmap) {
+		free(argbicon);
+		return(NULL);
+	}
 
 	for(i=0;i<(width*height);i++)
 	{
@@ -379,7 +388,7 @@ void amiga_icon_superimpose_favicon_internal(struct hlcache_handle *icon, struct
 	if(format != IDFMT_DIRECTMAPPED) return;
 #ifdef __amigaos4__
 	if ((icon != NULL) && (content_get_bitmap(icon) != NULL)) {
-		bm = ami_bitmap_get_native(content_get_bitmap(icon), 16, 16, NULL);
+		bm = ami_bitmap_get_native(content_get_bitmap(icon), 16, 16, false, NULL);
 	}
 
 	if(bm) {
@@ -485,8 +494,8 @@ void amiga_icon_superimpose_favicon(char *path, struct hlcache_handle *icon, cha
 	if(format == IDFMT_PALETTEMAPPED)
 	{
 		/* Free the 32-bit data we created */
-		FreeVec(icondata1);
-		FreeVec(icondata2);
+		free(icondata1);
+		free(icondata2);
 	}
 }
 
@@ -500,8 +509,8 @@ struct DiskObject *amiga_icon_from_bitmap(struct bitmap *bm)
 	if(bm)
 	{
 		bitmap = ami_bitmap_get_native(bm, THUMBNAIL_WIDTH,
-									THUMBNAIL_HEIGHT, NULL);
-		icondata = AllocVecTagList(THUMBNAIL_WIDTH * 4 * THUMBNAIL_HEIGHT, NULL);
+									THUMBNAIL_HEIGHT, false, NULL);
+		icondata = malloc(THUMBNAIL_WIDTH * 4 * THUMBNAIL_HEIGHT);
 		ami_bitmap_set_icondata(bm, icondata);
 
 		if(bitmap) {
@@ -543,6 +552,6 @@ void amiga_icon_free(struct DiskObject *dobj)
 	struct bitmap *bm = dobj->do_Gadget.UserData;
 
 	FreeDiskObject(dobj);
-	if(bm) FreeVec(ami_bitmap_get_icondata(bm));
+	if(bm) ami_bitmap_free_icondata(bm);
 }
 

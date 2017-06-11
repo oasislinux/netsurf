@@ -49,6 +49,7 @@ NSOPTION_STRING(arexx_startup, "Startup.nsrx")
 NSOPTION_STRING(arexx_shutdown, "Shutdown.nsrx")
 NSOPTION_STRING(download_dir, NULL)
 NSOPTION_BOOL(download_notify, true)
+NSOPTION_BOOL(download_notify_progress, false)
 NSOPTION_BOOL(faster_scroll, true)
 NSOPTION_BOOL(scale_quality, false)
 NSOPTION_INTEGER(dither_quality, 0)
@@ -79,7 +80,6 @@ NSOPTION_INTEGER(cookies_window_ypos, 0)
 NSOPTION_INTEGER(cookies_window_xsize, 0)
 NSOPTION_INTEGER(cookies_window_ysize, 0)
 NSOPTION_INTEGER(web_search_width, 0)
-NSOPTION_BOOL(direct_render, false)
 NSOPTION_BOOL(window_simple_refresh, false)
 NSOPTION_BOOL(resize_with_contents, false)
 NSOPTION_INTEGER(reformat_delay, 0)
@@ -89,8 +89,11 @@ NSOPTION_INTEGER(monitor_aspect_x, 0)
 NSOPTION_INTEGER(monitor_aspect_y, 0)
 NSOPTION_BOOL(accept_lang_locale, true)
 NSOPTION_STRING(local_charset, "ISO-8859-1")
+#ifdef __amigaos4__
+/* Options relevant for OS4 only */
+NSOPTION_BOOL(use_extmem, true)
+#else
 /* Options relevant for OS3 only */
-#ifndef __amigaos4__
 NSOPTION_BOOL(friend_bitmap, false)
 #endif
 

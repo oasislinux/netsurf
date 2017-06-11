@@ -40,10 +40,13 @@
 #include "amiga/gui.h"
 #include "amiga/download.h"
 #include "amiga/hotlist.h"
-#include "amiga/tree.h"
 #include "amiga/libs.h"
 #include "amiga/misc.h"
 #include "amiga/theme.h"
+
+#ifndef __amigaos4__
+#include "amiga/memory.h"
+#endif
 
 extern const char * const verarexx;
 extern const char * const wt_revid;
@@ -65,7 +68,8 @@ enum
 	RX_WINDOWS,
 	RX_ACTIVE,
 	RX_CLOSE,
-	RX_HOTLIST
+	RX_HOTLIST,
+	RX_SLABSTATS
 };
 
 static Object *arexx_obj = NULL;
@@ -93,6 +97,7 @@ RXHOOKF(rx_windows);
 RXHOOKF(rx_active);
 RXHOOKF(rx_close);
 RXHOOKF(rx_hotlist);
+RXHOOKF(rx_slabstats);
 
 STATIC struct ARexxCmd Commands[] =
 {
@@ -112,6 +117,7 @@ STATIC struct ARexxCmd Commands[] =
 	{"ACTIVE",	RX_ACTIVE,	rx_active,	"T=TAB/S", 		0, 	NULL, 	0, 	0, 	NULL },
 	{"CLOSE",	RX_CLOSE,	rx_close,	"W=WINDOW/K/N,T=TAB/K/N", 		0, 	NULL, 	0, 	0, 	NULL },
 	{"HOTLIST",	RX_HOTLIST,	rx_hotlist,	"A=ACTION/A", 		0, 	NULL, 	0, 	0, 	NULL },
+	{"SLABSTATS",	RX_SLABSTATS,	rx_slabstats,	"FILE", 		0, 	NULL, 	0, 	0, 	NULL },
 	{ NULL, 		0, 				NULL, 		NULL, 		0, 	NULL, 	0, 	0, 	NULL }
 };
 
@@ -271,7 +277,7 @@ RXHOOKF(rx_open)
 	{
 		if(!gw) return;
 
-		dln = ami_misc_allocvec_clear(sizeof(struct dlnode), 0);
+		dln = calloc(1, sizeof(struct dlnode));
 		dln->filename = strdup((char *)cmd->ac_ArgList[3]);
 		dln->node.ln_Name = strdup((char *)cmd->ac_ArgList[0]);
 		dln->node.ln_Type = NT_USER;
@@ -658,9 +664,23 @@ RXHOOKF(rx_hotlist)
 	cmd->ac_RC = 0;
 
 	if(strcasecmp((char *)cmd->ac_ArgList[0], "OPEN") == 0) {
-		ami_tree_open(hotlist_window, AMI_TREE_HOTLIST);
+		ami_hotlist_present();
 	} else if(strcasecmp((char *)cmd->ac_ArgList[0], "CLOSE") == 0) {
-		ami_tree_close(hotlist_window);
+		ami_hotlist_close();
 	}
+}
+
+RXHOOKF(rx_slabstats)
+{
+#ifndef __amigaos4__
+	BPTR fh = 0;
+
+	if(cmd->ac_ArgList[0] != NULL) {
+		fh = Open((char *)cmd->ac_ArgList[0], MODE_NEWFILE);
+	}
+	ami_memory_slab_dump(fh);
+
+	if(fh != 0) Close(fh);
+#endif
 }
 

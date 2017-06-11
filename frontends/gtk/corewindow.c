@@ -39,12 +39,11 @@
 #include <gtk/gtk.h>
 
 #include "utils/log.h"
-#include "utils/utils.h"
 #include "utils/messages.h"
 #include "utils/utf8.h"
+#include "netsurf/types.h"
 #include "netsurf/keypress.h"
 #include "netsurf/mouse.h"
-#include "desktop/plot_style.h"
 
 #include "gtk/compat.h"
 #include "gtk/gui.h" /* just for gtk_gui_gdkkey_to_nskey */
@@ -497,7 +496,6 @@ nsgtk_cw_draw_event(GtkWidget *widget, cairo_t *cr, gpointer data)
 	double y2;
 	struct rect clip;
 
-	current_widget = widget;
 	current_cr = cr;
 
 	cairo_clip_extents(cr, &x1, &y1, &x2, &y2);
@@ -508,8 +506,6 @@ nsgtk_cw_draw_event(GtkWidget *widget, cairo_t *cr, gpointer data)
 	clip.y1 = y2;
 
 	nsgtk_cw->draw(nsgtk_cw, &clip);
-
-	current_widget = NULL;
 
 	return FALSE;
 }
@@ -538,12 +534,10 @@ nsgtk_cw_draw_event(GtkWidget *widget,
 	clip.x1 = event->area.x + event->area.width;
 	clip.y1 = event->area.y + event->area.height;
 
-	current_widget = widget;
 	current_cr = gdk_cairo_create(nsgtk_widget_get_window(widget));
 
 	nsgtk_cw->draw(nsgtk_cw, &clip);
 
-	current_widget = NULL;
 	cairo_destroy(current_cr);
 
 	return FALSE;
@@ -553,19 +547,33 @@ nsgtk_cw_draw_event(GtkWidget *widget,
 
 
 /**
- * redraw window core window callback
+ * callback from core to request an invalidation of a GTK core window area.
  *
- * \param cw core window handle.
- * \param r rectangle that needs redrawing.
+ * The specified area of the window should now be considered
+ *  out of date. If the area is NULL the entire window must be
+ *  invalidated.
+ *
+ * \param[in] cw The core window to invalidate.
+ * \param[in] rect area to redraw or NULL for the entire window area.
+ * \return NSERROR_OK on success or appropriate error code.
  */
-static void
-nsgtk_cw_redraw_request(struct core_window *cw, const struct rect *r)
+static nserror
+nsgtk_cw_invalidate_area(struct core_window *cw, const struct rect *rect)
 {
 	struct nsgtk_corewindow *nsgtk_cw = (struct nsgtk_corewindow *)cw;
 
+	if (rect == NULL) {
+		gtk_widget_queue_draw(GTK_WIDGET(nsgtk_cw->drawing_area));
+		return NSERROR_OK;
+	}
+
 	gtk_widget_queue_draw_area(GTK_WIDGET(nsgtk_cw->drawing_area),
-				   r->x0, r->y0,
-				   r->x1 - r->x0, r->y1 - r->y0);
+				   rect->x0,
+				   rect->y0,
+				   rect->x1 - rect->x0,
+				   rect->y1 - rect->y0);
+
+	return NSERROR_OK;
 }
 
 
@@ -620,11 +628,11 @@ nsgtk_cw_scroll_visible(struct core_window *cw, const struct rect *r)
 
 
 /**
- * get window size core window callback
+ * Callback from the core to obtain the window viewport dimensions
  *
- * \param cw core window handle.
- * \param[out] width The width value to update
- * \param[out] height The height value to update
+ * \param[in] cw the core window object
+ * \param[out] width to be set to viewport width in px
+ * \param[out] height to be set to viewport height in px
  */
 static void
 nsgtk_cw_get_window_dimensions(struct core_window *cw, int *width, int *height)
@@ -634,17 +642,13 @@ nsgtk_cw_get_window_dimensions(struct core_window *cw, int *width, int *height)
 	GtkAdjustment *hadj;
 	gdouble page;
 
-	if (width != NULL) {
-		hadj = gtk_scrolled_window_get_hadjustment(nsgtk_cw->scrolled);
-		g_object_get(hadj, "page-size", &page, NULL);
-		*width = page;
-	}
+	hadj = gtk_scrolled_window_get_hadjustment(nsgtk_cw->scrolled);
+	g_object_get(hadj, "page-size", &page, NULL);
+	*width = page;
 
-	if (height != NULL) {
-		vadj = gtk_scrolled_window_get_vadjustment(nsgtk_cw->scrolled);
-		g_object_get(vadj, "page-size", &page, NULL);
-		*height = page;
-	}
+	vadj = gtk_scrolled_window_get_vadjustment(nsgtk_cw->scrolled);
+	g_object_get(vadj, "page-size", &page, NULL);
+	*height = page;
 }
 
 
@@ -658,7 +662,7 @@ static void
 nsgtk_cw_drag_status(struct core_window *cw, core_window_drag_status ds)
 {
 	struct nsgtk_corewindow *nsgtk_cw = (struct nsgtk_corewindow *)cw;
-	nsgtk_cw->drag_staus = ds;
+	nsgtk_cw->drag_status = ds;
 }
 
 
@@ -666,17 +670,19 @@ nsgtk_cw_drag_status(struct core_window *cw, core_window_drag_status ds)
  * core window callback table for nsgtk
  */
 static struct core_window_callback_table nsgtk_cw_cb_table = {
-	.redraw_request = nsgtk_cw_redraw_request,
+	.invalidate = nsgtk_cw_invalidate_area,
 	.update_size = nsgtk_cw_update_size,
 	.scroll_visible = nsgtk_cw_scroll_visible,
 	.get_window_dimensions = nsgtk_cw_get_window_dimensions,
 	.drag_status = nsgtk_cw_drag_status
 };
 
+
 /* exported function documented gtk/corewindow.h */
 nserror nsgtk_corewindow_init(struct nsgtk_corewindow *nsgtk_cw)
 {
 	nsgtk_cw->cb_table = &nsgtk_cw_cb_table;
+	nsgtk_cw->drag_status = CORE_WINDOW_DRAG_NONE;
 
 	/* input method setup */
 	nsgtk_cw->input_method = gtk_im_multicontext_new();

@@ -1,7 +1,6 @@
 # utils sources
 
 S_UTILS := \
-	base64.c \
 	bloom.c \
 	corestrings.c \
 	file.c \
@@ -13,7 +12,6 @@ S_UTILS := \
 	log.c \
 	messages.c \
 	nsoption.c \
-	nsurl.c \
 	punycode.c \
 	talloc.c \
 	time.c \

@@ -31,7 +31,6 @@
 #include "utils/log.h"
 #include "utils/utils.h"
 #include "netsurf/layout.h"
-#include "netsurf/plotters.h"
 #include "netsurf/content.h"
 #include "content/hlcache.h"
 #include "content/urldb.h"
@@ -45,39 +44,6 @@
 #define HEIGHT 86
 #define RIGHT_MARGIN 50
 #define BOTTOM_MARGIN 30
-
-struct history_page {
-	nsurl *url;    /**< Page URL, never 0. */
-	lwc_string *frag_id; /** Fragment identifier, or 0. */
-	char *title;  /**< Page title, never 0. */
-};
-
-/** A node in the history tree. */
-struct history_entry {
-  	struct history_page page;
-	struct history_entry *back;  /**< Parent. */
-	struct history_entry *next;  /**< Next sibling. */
-	struct history_entry *forward;  /**< First child. */
-	struct history_entry *forward_pref;  /**< Child in direction of
-	                                          current entry. */
-	struct history_entry *forward_last;  /**< Last child. */
-	unsigned int children;  /**< Number of children. */
-	int x;  /**< Position of node. */
-	int y;  /**< Position of node. */
-	struct bitmap *bitmap;  /**< Thumbnail bitmap, or 0. */
-};
-
-/** History tree for a window. */
-struct history {
-	/** First page in tree (page that window opened with). */
-	struct history_entry *start;
-	/** Current position in tree. */
-	struct history_entry *current;
-	/** Width of layout. */
-	int width;
-	/** Height of layout. */
-	int height;
-};
 
 
 /**
@@ -235,144 +201,9 @@ static void browser_window_history__layout(struct history *history)
 	history->height += BOTTOM_MARGIN / 2;
 }
 
-/**
- * Recursively redraw a history_entry.
- *
- * \param history history containing the entry
- * \param entry entry to render
- * \param x0 area top left x coordinate
- * \param y0 area top left y coordinate
- * \param x1 area bottom right x coordinate
- * \param y1 area bottom right y coordinate
- * \param x window x offset
- * \param y window y offset
- * \param clip clip redraw
- * \param ctx     current redraw context
- */
-static bool
-browser_window_history__redraw_entry(struct history *history,
-		struct history_entry *entry,
-		int x0, int y0, int x1, int y1,
-		int x, int y, bool clip,
-		const struct redraw_context *ctx)
-{
-	const struct plotter_table *plot = ctx->plot;
-	size_t char_offset;
-	int actual_x;
-	struct history_entry *child;
-	colour c = entry == history->current ?
-			HISTORY_COLOUR_SELECTED : HISTORY_COLOUR_FOREGROUND;
-	int tailsize = 5;
-	int xoffset = x - x0;
-	int yoffset = y - y0;
-        plot_style_t pstyle_history_rect = { 
-            .stroke_type = PLOT_OP_TYPE_SOLID,
-            .stroke_colour = c,
-            .stroke_width = entry == history->current ? 3 : 1,
-        };
-	plot_font_style_t fstyle = *plot_style_font;
-	nserror res;
-
-	if (clip) {
-		struct rect rect;
-		rect.x0 = x0 + xoffset;
-		rect.y0 = y0 + yoffset;
-		rect.x1 = x1 + xoffset;
-		rect.y1 = y1 + yoffset;
-		if (!plot->clip(&rect)) {
-			return false;
-		}
-	}
-
-	/* Only attempt to plot bitmap if it is present */
-	if (entry->bitmap != NULL) {
-		plot->bitmap(entry->x + xoffset,
-			     entry->y + yoffset,
-			     WIDTH, HEIGHT,
-			     entry->bitmap, 0xffffff, 0);
-	}
-
-	if (!plot->rectangle(entry->x - 1 + xoffset, 
-                            entry->y - 1 + yoffset,
-                            entry->x + xoffset + WIDTH, 
-                            entry->y + yoffset + HEIGHT,
-			     &pstyle_history_rect)) {
-		return false;
-	}
-
-	res = guit->layout->position(plot_style_font, entry->page.title,
-				     strlen(entry->page.title), WIDTH,
-				     &char_offset, &actual_x);
-	if (res != NSERROR_OK) {
-		return false;
-	}
-
-	fstyle.background = HISTORY_COLOUR_BACKGROUND;
-	fstyle.foreground = c;
-	fstyle.weight = entry == history->current ? 900 : 400;
-
-	if (!plot->text(entry->x + xoffset, entry->y + HEIGHT + 12 + yoffset,
-			entry->page.title, char_offset, &fstyle))
-		return false;
-
-	for (child = entry->forward; child; child = child->next) {
-		if (!plot->line(entry->x + WIDTH + xoffset,
-				entry->y + HEIGHT / 2 + yoffset,
-		      	entry->x + WIDTH + tailsize + xoffset,
-				entry->y + HEIGHT / 2 + yoffset, 
-			       plot_style_stroke_history))
-			return false;
-		if (!plot->line(entry->x + WIDTH + tailsize + xoffset,
-			       entry->y + HEIGHT / 2 + yoffset,
-			       child->x - tailsize +xoffset,
-			       child->y + HEIGHT / 2 + yoffset,
-			       plot_style_stroke_history))
-			return false;
-		if (!plot->line(child->x - tailsize + xoffset,
-			       child->y + HEIGHT / 2 + yoffset,
-			       child->x + xoffset, child->y +
-			       			HEIGHT / 2 + yoffset,
-			       plot_style_stroke_history))
-			return false;
-		if (!browser_window_history__redraw_entry(history, child,
-				x0, y0, x1, y1, x, y, clip, ctx))
-			return false;
-	}
-
-	return true;
-}
 
 
-/**
- * Find the history entry at a position.
- *
- * \param  entry  entry to search from
- * \param  x      coordinate
- * \param  y      coordinate
- * \return  an entry if found, 0 if none
- */
 
-static struct history_entry *browser_window_history__find_position(
-		struct history_entry *entry, int x, int y)
-{
-	struct history_entry *child;
-	struct history_entry *found;
-
-	if (!entry)
-		return 0;
-
-	if (entry->x <= x && x <= entry->x + WIDTH &&
-			entry->y <= y && y <= entry->y + HEIGHT)
-		return entry;
-
-	for (child = entry->forward; child; child = child->next) {
-		found = browser_window_history__find_position(child, x, y);
-		if (found)
-			return found;
-	}
-
-	return 0;
-}
 
 /**
  * Enumerate subentries in history
@@ -426,6 +257,7 @@ nserror browser_window_history_create(struct browser_window *bw)
 	history->height = BOTTOM_MARGIN / 2;
 
 	bw->history = history;
+
 	return NSERROR_OK;
 }
 
@@ -682,96 +514,6 @@ nserror browser_window_history_go(struct browser_window *bw,
 
 
 /* exported interface documented in desktop/browser_history.h */
-void browser_window_history_size(struct browser_window *bw,
-		int *width, int *height)
-{
-	assert(bw != NULL);
-	assert(bw->history != NULL);
-
-	*width = bw->history->width;
-	*height = bw->history->height;
-}
-
-
-/* exported interface documented in desktop/browser_history.h */
-bool browser_window_history_redraw(struct browser_window *bw,
-		const struct redraw_context *ctx)
-{
-	struct history *history;
-
-	assert(bw != NULL);
-	history = bw->history;
-
-	if (history == NULL) {
-		LOG("Attempt to draw NULL history.");
-		return false;
-	}
-
-	if (!history->start)
-		return true;
-	return browser_window_history__redraw_entry(history, history->start,
-			0, 0, 0, 0, 0, 0, false, ctx);
-}
-
-
-/* exported interface documented in desktop/browser_history.h */
-bool browser_window_history_redraw_rectangle(struct browser_window *bw,
-	int x0, int y0, int x1, int y1,
-	int x, int y, const struct redraw_context *ctx)
-{
-	struct history *history;
-
-	assert(bw != NULL);
-	history = bw->history;
-
-	if (!history->start)
-		return true;
-	return browser_window_history__redraw_entry(history, history->start,
-		x0, y0, x1, y1, x, y, true, ctx);
-}
-
-
-/* exported interface documented in desktop/browser_history.h */
-bool browser_window_history_click(struct browser_window *bw,
-		int x, int y, bool new_window)
-{
-	struct history_entry *entry;
-	struct history *history;
-
-	assert(bw != NULL);
-	history = bw->history;
-
-	entry = browser_window_history__find_position(history->start, x, y);
-	if (!entry)
-		return false;
-	if (entry == history->current)
-		return false;
-
-	browser_window_history_go(bw, entry, new_window);
-
-	return true;
-}
-
-
-/* exported interface documented in desktop/browser_history.h */
-const char *browser_window_history_position_url(struct browser_window *bw,
-		int x, int y)
-{
-	struct history_entry *entry;
-	struct history *history;
-
-	assert(bw != NULL);
-	history = bw->history;
-
-	entry = browser_window_history__find_position(history->start, x, y);
-	if (!entry)
-		return 0;
-
-	return nsurl_access(entry->page.url);
-}
-
-
-/* exported interface documented in desktop/browser_history.h */
 void browser_window_history_enumerate_forward(const struct browser_window *bw, 
 		browser_window_history_enumerate_cb cb, void *user_data)
 {
@@ -818,10 +560,9 @@ void browser_window_history_enumerate(const struct browser_window *bw,
 
 
 /* exported interface documented in desktop/browser_history.h */
-const char *browser_window_history_entry_get_url(
-		const struct history_entry *entry)
+nsurl *browser_window_history_entry_get_url(const struct history_entry *entry)
 {
-	return nsurl_access(entry->page.url);
+	return nsurl_ref(entry->page.url);
 }
 
 

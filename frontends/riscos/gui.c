@@ -55,6 +55,7 @@
 #include "netsurf/cookie_db.h"
 #include "netsurf/url_db.h"
 #include "desktop/save_complete.h"
+#include "desktop/hotlist.h"
 #include "content/backing_store.h"
 
 #include "riscos/gui.h"
@@ -73,6 +74,7 @@
 #include "riscos/window.h"
 #include "riscos/iconbar.h"
 #include "riscos/sslcert.h"
+#include "riscos/local_history.h"
 #include "riscos/global_history.h"
 #include "riscos/cookies.h"
 #include "riscos/wimp_event.h"
@@ -1178,9 +1180,16 @@ static nserror gui_init(int argc, char** argv)
 	/* Initialise save complete functionality */
 	save_complete_init();
 
-	/* Load in visited URLs and Cookies */
+	/* Initialise the font subsystem */
+	nsfont_init();
+
+	/* Load in visited URLs, Cookies, and hostlist */
 	urldb_load(nsoption_charp(url_path));
 	urldb_load_cookies(nsoption_charp(cookie_file));
+	hotlist_init(nsoption_charp(hotlist_path),
+			nsoption_bool(external_hotlists) ?
+					NULL :
+					nsoption_charp(hotlist_save));
 
 	/* Initialise with the wimp */
 	error = xwimp_initialise(wimp_VERSION_RO38, task_name,
@@ -1209,9 +1218,6 @@ static nserror gui_init(int argc, char** argv)
 			ro_gui_selection_drag_claim);
 	ro_message_register_route(message_WINDOW_INFO,
 			ro_msg_window_info);
-
-	/* Initialise the font subsystem */
-	nsfont_init();
 
 	/* Initialise global information */
 	ro_gui_get_screen_properties();
@@ -1247,9 +1253,6 @@ static nserror gui_init(int argc, char** argv)
 	/* Initialise query windows */
 	ro_gui_query_init();
 
-	/* Initialise the history subsystem */
-	ro_gui_history_init();
-
 	/* Initialise toolbars */
 	ro_toolbar_init();
 
@@ -1267,18 +1270,6 @@ static nserror gui_init(int argc, char** argv)
 
 	/* Finally, check Inet$Resolvers for sanity */
 	ro_gui_check_resolvers();
-
-	/* certificate verification window */
-	ro_gui_cert_postinitialise();
-
-	/* hotlist window */
-	ro_gui_hotlist_postinitialise();
-
-	/* global history window */
-	ro_gui_global_history_postinitialise();
-
-	/* cookies window */
-	ro_gui_cookies_postinitialise();
 
 	open_window = nsoption_bool(open_browser_at_startup);
 
@@ -1567,9 +1558,10 @@ static void gui_quit(void)
 	urldb_save_cookies(nsoption_charp(cookie_jar));
 	urldb_save(nsoption_charp(url_save));
 	ro_gui_window_quit();
-	ro_gui_global_history_destroy();
-	ro_gui_hotlist_destroy();
-	ro_gui_cookies_destroy();
+	ro_gui_local_history_finalise();
+	ro_gui_global_history_finalise();
+	ro_gui_hotlist_finalise();
+	ro_gui_cookies_finalise();
 	ro_gui_saveas_quit();
 	ro_gui_url_bar_fini();
 	rufl_quit();
@@ -2525,6 +2517,7 @@ int main(int argc, char** argv)
 	}
 
 	netsurf_exit();
+	nsoption_finalise(nsoptions, nsoptions_default);
 
 	return 0;
 }

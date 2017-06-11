@@ -53,6 +53,16 @@ struct test_compare {
 	bool res;
 };
 
+/* Fixtures */
+
+static void corestring_create(void)
+{
+	ck_assert(corestrings_init() == NSERROR_OK);
+}
+
+/**
+ * iterator for any remaining strings in teardown fixture
+ */
 static void netsurf_lwc_iterator(lwc_string *str, void *pw)
 {
 	fprintf(stderr,
@@ -61,6 +71,15 @@ static void netsurf_lwc_iterator(lwc_string *str, void *pw)
 		(int)lwc_string_length(str),
 		lwc_string_data(str));
 }
+
+static void corestring_teardown(void)
+{
+	corestrings_fini();
+
+	lwc_iterate_strings(netsurf_lwc_iterator, NULL);
+}
+
+/* tests */
 
 static const char *base_str = "http://a/b/c/d;p?q";
 
@@ -97,6 +116,8 @@ static const struct test_pairs create_tests[] = {
 
 	{ "http://www.ns-b.org:/",
 	  "http://www.ns-b.org/" },
+	{ "http://///////////www.ns-b.org:/",
+	  "http://www.ns-b.org/" },
 	{ "http://u@www.ns-b.org:/hello",
 	  "http://u@www.ns-b.org/hello" },
 	{ "http://u:p@www.ns-b.org:/hello",
@@ -110,11 +131,43 @@ static const struct test_pairs create_tests[] = {
 	{ "mailto:u@a",		"mailto:u@a" },
 	{ "mailto:@a",		"mailto:a" },
 
+	{ "file:///",		"file:///" },
+	{ "file://",		"file:///" },
+	{ "file:/",		"file:///" },
+	{ "file:",		"file:///" },
+	{ "file:////",		"file:////" },
+	{ "file://///",		"file://///" },
+
+	{ "file://localhost/",	"file:///" },
+	{ "file://foobar/",	"file:///" },
+	{ "file://foobar",	"file:///" },
+	{ "file:///foobar",	"file:///foobar" },
+	{ "file://tlsa@foo/",	"file:///" },
+
 	/* test case insensitivity */
 	{ "HTTP://a/b",		"http://a/b" },
+	{ "HTTPS://a/b",	"https://a/b" },
 	{ "ftp://a/b",		"ftp://a/b" },
 	{ "FTP://a/b",		"ftp://a/b" },
+	{ "MAILTO:foo@bar",	"mailto:foo@bar" },
+	{ "FILE:///",		"file:///" },
+	{ "http://HOST/",	"http://host/" },
 
+	/* punycode */
+	{ "http://a.कॉम/a", "http://a.xn--11b4c3d/a" },
+	{ "https://smog.大众汽车/test", "https://smog.xn--3oq18vl8pn36a/test"},
+
+	/* unnecessary escape */
+	{ "http://%7a%7A/", "http://zz/" },
+
+	/* bad escape */
+	{ "http://%1g%G0/", "http://%1g%g0/" },
+
+	{ "    http://www.ns-b.org/",		"http://www.ns-b.org/" },
+	{ "http://www.ns-b.org/    ",		"http://www.ns-b.org/" },
+	{ "http://www.ns-b.org    ",		"http://www.ns-b.org/" },
+	{ "http://www.ns-b.org/?q   ",		"http://www.ns-b.org/?q" },
+	{ "http://www.ns-b.org/#f    ",		"http://www.ns-b.org/#f" },
 };
 
 /**
@@ -377,6 +430,9 @@ static const struct test_pairs join_tests[] = {
 	{ "  /  ",		"http://a/" },
 	{ "  ?  ",		"http://a/b/c/d;p?" },
 	{ "  h  ",		"http://a/b/c/h" },
+	{ "//foo?",		"http://foo/?" },
+	{ "//foo#bar",		"http://foo/#bar" },
+	{ "//foo/",		"http://foo/" },
 	{ "http://<!--#echo var=", "http://<!--/#echo%20var="},
 	/* [1] Extra slash beyond rfc3986 5.4.1 example, since we're
 	 *     testing normalisation in addition to joining */
@@ -583,6 +639,8 @@ START_TEST(nsurl_compare_test)
 END_TEST
 
 
+/* component test case */
+
 /**
  * url component tests
  *
@@ -591,17 +649,26 @@ END_TEST
  * result is checked against test1 and res as approprite.
  */
 static const struct test_compare component_tests[] = {
-	{ "http://a/b/c/d;p?q",
-	  "http",
-	  NSURL_SCHEME,
-	  true },
+	{ "http://u:p@a:66/b/c/d;p?q#f", "http", NSURL_SCHEME, true },
+	{ "http://u:p@a:66/b/c/d;p?q#f", "u", NSURL_USERNAME, true },
+	{ "http://u:p@a:66/b/c/d;p?q#f", "p", NSURL_PASSWORD, true },
+	{ "http://u:p@a:66/b/c/d;p?q#f", "a", NSURL_HOST, true },
+	{ "http://u:p@a:66/b/c/d;p?q#f", "66", NSURL_PORT, true },
+	{ "http://u:p@a:66/b/c/d;p?q#f", "/b/c/d;p", NSURL_PATH, true },
+	{ "http://u:p@a:66/b/c/d;p?q#f", "?q", NSURL_QUERY, true },
+	{ "http://u:p@a:66/b/c/d;p?q#f", "f", NSURL_FRAGMENT, true },
 
-	{ "file:///",
-	  NULL,
-	  NSURL_HOST,
-	  false },
+	{ "file:", "file", NSURL_SCHEME, true },
+	{ "file:", NULL, NSURL_USERNAME, false },
+	{ "file:", NULL, NSURL_PASSWORD, false },
+	{ "file:", NULL, NSURL_HOST, false },
+	{ "file:", NULL, NSURL_PORT, false },
+	{ "file:", "/", NSURL_PATH, true },
+	{ "file:", NULL, NSURL_QUERY, false },
+	{ "file:", NULL, NSURL_FRAGMENT, false },
 
 };
+
 
 /**
  * get component
@@ -629,6 +696,7 @@ START_TEST(nsurl_get_component_test)
 }
 END_TEST
 
+
 /**
  * has component
  */
@@ -649,6 +717,30 @@ START_TEST(nsurl_has_component_test)
 	nsurl_unref(url1);
 }
 END_TEST
+
+
+/**
+ * test case for componnet get and has API
+ */
+static TCase *nsurl_component_case_create(void)
+{
+	TCase *tc;
+	tc = tcase_create("Component");
+
+	tcase_add_unchecked_fixture(tc,
+				    corestring_create,
+				    corestring_teardown);
+
+	tcase_add_loop_test(tc,
+			    nsurl_get_component_test,
+			    0, NELEMS(component_tests));
+	tcase_add_loop_test(tc,
+			    nsurl_has_component_test,
+			    0, NELEMS(component_tests));
+
+	return tc;
+}
+
 
 static const struct test_pairs fragment_tests[] = {
 	{ "http://www.f.org/a/b/c#def", "http://www.f.org/a/b/c" },
@@ -728,40 +820,6 @@ START_TEST(nsurl_refragment_test)
 }
 END_TEST
 
-static const struct test_pairs parent_tests[] = {
-	{ "http://www.f.org/a/b/c", "http://www.f.org/a/b/" },
-};
-
-/**
- * generate parent url
- */
-START_TEST(nsurl_parent_test)
-{
-	nserror err;
-	nsurl *url;
-	nsurl *res_url;
-	const struct test_pairs *tst = &parent_tests[_i];
-
-	/* not testing create, this should always succeed */
-	err = nsurl_create(tst->test, &url);
-	ck_assert(err == NSERROR_OK);
-
-	err = nsurl_parent(url, &res_url);
-	if (tst->res == NULL) {
-		/* result must be invalid (bad input) */
-		ck_assert(err != NSERROR_OK);
-	} else {
-		/* result must be valid */
-		ck_assert(err == NSERROR_OK);
-
-		ck_assert_str_eq(nsurl_access(res_url), tst->res);
-
-		nsurl_unref(res_url);
-	}
-	nsurl_unref(url);
-
-}
-END_TEST
 
 
 /**
@@ -1136,6 +1194,7 @@ START_TEST(nsurl_api_assert_nice_test)
 }
 END_TEST
 
+
 /**
  * check parent asserts on NULL parameter
  */
@@ -1150,22 +1209,133 @@ START_TEST(nsurl_api_assert_parent_test)
 END_TEST
 
 
-/* Fixtures */
 
-static void corestring_create(void)
+
+/* parent test case */
+
+static const struct test_pairs parent_tests[] = {
+	{ "http://www.f.org/a/b/c", "http://www.f.org/a/b/" },
+	{ "https://www.moo.org/", "https://www.moo.org/" },
+	{ "https://www.moo.org/asinglepathelementthatsquitelong/", "https://www.moo.org/" },
+	{ "https://user:pw@www.moo.org/a/b#x?a=b", "https://user:pw@www.moo.org/a/" },
+};
+
+/**
+ * generate parent url
+ */
+START_TEST(nsurl_parent_test)
 {
-	ck_assert(corestrings_init() == NSERROR_OK);
+	nserror err;
+	nsurl *url;
+	nsurl *res_url;
+	const struct test_pairs *tst = &parent_tests[_i];
+
+	/* not testing create, this should always succeed */
+	err = nsurl_create(tst->test, &url);
+	ck_assert(err == NSERROR_OK);
+
+	err = nsurl_parent(url, &res_url);
+	if (tst->res == NULL) {
+		/* result must be invalid (bad input) */
+		ck_assert(err != NSERROR_OK);
+	} else {
+		/* result must be valid */
+		ck_assert(err == NSERROR_OK);
+
+		ck_assert_str_eq(nsurl_access(res_url), tst->res);
+
+		nsurl_unref(res_url);
+	}
+	nsurl_unref(url);
+
+}
+END_TEST
+
+
+/**
+ * test case for parent API
+ */
+static TCase *nsurl_parent_case_create(void)
+{
+	TCase *tc;
+	tc = tcase_create("Parent");
+
+	tcase_add_unchecked_fixture(tc,
+				    corestring_create,
+				    corestring_teardown);
+
+	tcase_add_loop_test(tc,
+			    nsurl_parent_test,
+			    0, NELEMS(parent_tests));
+
+	return tc;
 }
 
-static void corestring_teardown(void)
-{
-	corestrings_fini();
 
-	lwc_iterate_strings(netsurf_lwc_iterator, NULL);
+/* utf8 test case */
+
+/**
+ * utf8 tests
+ */
+static const struct test_pairs utf8_tests[] = {
+	{ "http://a.xn--11b4c3d/a", "http://a.कॉम/a"  },
+	{ "https://smog.xn--3oq18vl8pn36a/test", "https://smog.大众汽车/test"},
+
+};
+
+
+/**
+ * get utf8 test
+ */
+START_TEST(nsurl_get_utf8_test)
+{
+	nserror err;
+	nsurl *url;
+	const struct test_pairs *tst = &utf8_tests[_i];
+	char *utf8out;
+	size_t utf8out_len;
+
+	/* not testing create, this should always succeed */
+	err = nsurl_create(tst->test, &url);
+	ck_assert(err == NSERROR_OK);
+
+	err = nsurl_get_utf8(url, &utf8out, &utf8out_len);
+	ck_assert(err == NSERROR_OK);
+
+	ck_assert_str_eq(utf8out, tst->res);
+
+	free(utf8out);
+
+	nsurl_unref(url);
+}
+END_TEST
+
+
+/**
+ * test case for utf8 output
+ */
+static TCase *nsurl_utf8_case_create(void)
+{
+	TCase *tc;
+	tc = tcase_create("UTF-8 output");
+
+	tcase_add_unchecked_fixture(tc,
+				    corestring_create,
+				    corestring_teardown);
+
+	tcase_add_loop_test(tc,
+			    nsurl_get_utf8_test,
+			    0, NELEMS(utf8_tests));
+
+	return tc;
 }
 
-/* suite generation */
 
+/* test suite */
+
+/**
+ * nsurl suite generation
+ */
 static Suite *nsurl_suite(void)
 {
 	Suite *s;
@@ -1178,8 +1348,6 @@ static Suite *nsurl_suite(void)
 	TCase *tc_join;
 	TCase *tc_compare;
 	TCase *tc_fragment;
-	TCase *tc_component;
-	TCase *tc_parent;
 
 	s = suite_create("nsurl");
 
@@ -1348,46 +1516,28 @@ static Suite *nsurl_suite(void)
 
 	tcase_add_loop_test(tc_fragment,
 			    nsurl_defragment_test,
-			    0, NELEMS(parent_tests));
+			    0, NELEMS(fragment_tests));
 	tcase_add_loop_test(tc_fragment,
 			    nsurl_refragment_test,
-			    0, NELEMS(parent_tests));
+			    0, NELEMS(fragment_tests));
 
 	suite_add_tcase(s, tc_fragment);
 
 
 	/* component */
-	tc_component = tcase_create("Component");
-
-	tcase_add_unchecked_fixture(tc_component,
-				    corestring_create,
-				    corestring_teardown);
-
-	tcase_add_loop_test(tc_component,
-			    nsurl_get_component_test,
-			    0, NELEMS(component_tests));
-	tcase_add_loop_test(tc_component,
-			    nsurl_has_component_test,
-			    0, NELEMS(component_tests));
-
-	suite_add_tcase(s, tc_component);
+	suite_add_tcase(s, nsurl_component_case_create());
 
 
 	/* parent */
-	tc_parent = tcase_create("Parent");
+	suite_add_tcase(s, nsurl_parent_case_create());
 
-	tcase_add_unchecked_fixture(tc_parent,
-				    corestring_create,
-				    corestring_teardown);
+	/* UTF-8 output */
+	suite_add_tcase(s, nsurl_utf8_case_create());
 
-	tcase_add_loop_test(tc_parent,
-			    nsurl_parent_test,
-			    0, NELEMS(parent_tests));
-
-	suite_add_tcase(s, tc_parent);
 
 	return s;
 }
+
 
 int main(int argc, char **argv)
 {

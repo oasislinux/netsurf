@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "utils/log.h"
 #include "utils/errors.h"
 #include "desktop/download.h"
 #include "netsurf/download.h"
