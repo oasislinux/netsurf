@@ -32,6 +32,7 @@
 #include "netsurf/netsurf.h"
 #include "desktop/searchweb.h"
 
+#include "tiny/download.h"
 #include "tiny/fetch.h"
 #include "tiny/icons.h"
 #include "tiny/platform.h"
@@ -140,7 +141,7 @@ main(int argc, char *argv[])
 	struct netsurf_table tiny_table = {
 		.misc = &tiny_misc_table,
 		.window = tiny_window_table,
-		/* download */
+		.download = tiny_download_table,
 		.clipboard = tiny_clipboard_table,
 		.fetch = tiny_fetch_table,
 		/* file */
