@@ -38,6 +38,8 @@ fetch_filetype(const char *unix_path)
 	l = strlen(unix_path);
 	if (2 < l && strcasecmp(unix_path + l - 3, "css") == 0)
 		return "text/css";
+	if (2 < l && strcasecmp(unix_path + l - 3, "svg") == 0)
+		return "image/svg+xml";
 	// TODO: more mimetypes
 	return "text/html";
 }
