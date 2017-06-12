@@ -753,7 +753,7 @@ wldispatch(struct epoll_event *ev)
 }
 
 nserror
-tiny_init(void)
+platform_init(void)
 {
 	int fd;
 	struct epoll_event ev;
@@ -865,7 +865,7 @@ err0:
 }
 
 void
-tiny_run(void)
+platform_run(void)
 {
 	struct epoll_event ev[32];
 	int timeout, i, n;

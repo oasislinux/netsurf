@@ -219,7 +219,7 @@ main(int argc, char *argv[])
 	if (err != NSERROR_OK)
 		die("failed to create url\n");
 
-	err = tiny_init();
+	err = platform_init();
 	if (err != NSERROR_OK)
 		die("failed to initialize platform\n");
 
@@ -227,7 +227,7 @@ main(int argc, char *argv[])
 	if (err != NSERROR_OK)
 		die("failed to create browser window\n");
 
-	tiny_run();
+	platform_run();
 
 	netsurf_exit();
 	nsoption_finalise(nsoptions, nsoptions_default);

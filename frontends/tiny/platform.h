@@ -23,8 +23,8 @@
 
 struct rect;
 
-nserror tiny_init(void);
-void tiny_run(void);
+nserror platform_init(void);
+void platform_run(void);
 
 struct platform_window *platform_window_create(struct gui_window *g);
 void platform_window_update(struct platform_window *p, const struct rect *r);
