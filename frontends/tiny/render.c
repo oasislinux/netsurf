@@ -265,6 +265,8 @@ outlineimage(FT_Outline *outline, int *left, int *top, pixman_image_t **image)
 	*left = -box.xMin >> 6;
 	*top = (box.yMin >> 6) + h;
 	*image = pixman_image_create_bits(PIXMAN_a8, w, h, NULL, 0);
+	if (!*image)
+		return NSERROR_NOMEM;
 	bitmap.width = w;
 	bitmap.rows = h;
 	bitmap.pitch = pixman_image_get_stride(*image);
@@ -603,23 +605,21 @@ plotoutline(FT_Outline *outline, colour c)
 
 	err = outlineimage(outline, &x, &y, &image);
 	if (err != NSERROR_OK)
-		goto err;
+		goto err0;
 	w = pixman_image_get_width(image);
 	h = pixman_image_get_height(image);
 
 	solid = pixman_image_create_solid_fill(&color);
 	if (!solid) {
 		err = NSERROR_NOMEM;
-		goto err;
+		goto err1;
 	}
 	pixman_image_composite32(PIXMAN_OP_OVER, solid, image, target, 0, 0, 0, 0, -x, -y, w, h);
 
-err:
-	if (image)
-		pixman_image_unref(image);
-	if (solid)
-		pixman_image_unref(solid);
-
+	pixman_image_unref(solid);
+err1:
+	pixman_image_unref(image);
+err0:
 	return err;
 }
 
