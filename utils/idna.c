@@ -26,7 +26,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <libutf8proc/utf8proc.h>
+#include <utf8proc.h>
 
 #include "netsurf/inttypes.h"
 
