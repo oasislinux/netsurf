@@ -36,7 +36,6 @@
 #include <xkbcommon/xkbcommon.h>
 
 #include "utils/log.h"
-#include "utils/nsurl.h"
 #include "utils/utils.h"
 #include "netsurf/browser_window.h"
 #include "netsurf/clipboard.h"
@@ -759,7 +758,6 @@ tiny_init(void)
 	int fd;
 	struct epoll_event ev;
 	nserror err;
-	nsurl *url;
 
 	wl = calloc(1, sizeof(*wl));
 	if (wl == NULL) {
@@ -834,15 +832,7 @@ tiny_init(void)
 		goto err6;
 	}
 
-	err = nsurl_create(NETSURF_HOMEPAGE, &url);
-	if (err != NSERROR_OK)
-		goto err7;
-
-	err = browser_window_create(BW_CREATE_HISTORY, url, NULL, NULL, NULL);
-	nsurl_unref(url);
-	if (err != NSERROR_OK)
-		goto err7;
-	return err;
+	return NSERROR_OK;
 
 err7:
 	wl_surface_destroy(wl->cursor.surface);

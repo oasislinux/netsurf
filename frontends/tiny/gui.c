@@ -20,6 +20,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
 
 #include "utils/errors.h"
 #include "utils/file.h"
@@ -27,6 +29,7 @@
 #include "utils/log.h"
 #include "utils/nsoption.h"
 #include "utils/nsurl.h"
+#include "netsurf/browser_window.h"
 #include "netsurf/cookie_db.h"
 #include "netsurf/misc.h"
 #include "netsurf/netsurf.h"
@@ -138,6 +141,8 @@ int
 main(int argc, char *argv[])
 {
 	nserror err;
+	char *addr;
+	nsurl *url;
 	struct netsurf_table tiny_table = {
 		.misc = &tiny_misc_table,
 		.window = tiny_window_table,
@@ -191,12 +196,38 @@ main(int argc, char *argv[])
 	if (err != NSERROR_OK)
 		die("failed to initialize renderer\n");
 
-	err = tiny_init();
-	if (err == NSERROR_OK) {
-		tiny_run();
+	if (argc > 1) {
+		struct stat st;
+		if (stat(argv[1], &st) == 0) {
+			char buf[PATH_MAX + 7] = "file://";
+
+			if (!realpath(argv[1], buf + 7))
+				die("failed to locate local path address");
+			addr = strdup(buf);
+		} else {
+			addr = strdup(argv[1]);
+		}
+	} else if (nsoption_charp(homepage_url)) {
+		addr = strdup(nsoption_charp(homepage_url));
 	} else {
-		fprintf(stderr, "failed to create browser window\n");
+		addr = strdup(NETSURF_HOMEPAGE);
 	}
+	if (!addr)
+		die("failed to allocate address\n");
+
+	err = nsurl_create(addr, &url);
+	if (err != NSERROR_OK)
+		die("failed to create url\n");
+
+	err = tiny_init();
+	if (err != NSERROR_OK)
+		die("failed to initialize platform\n");
+
+	err = browser_window_create(BW_CREATE_HISTORY, url, NULL, NULL, NULL);
+	if (err != NSERROR_OK)
+		die("failed to create browser window\n");
+
+	tiny_run();
 
 	netsurf_exit();
 	nsoption_finalise(nsoptions, nsoptions_default);
