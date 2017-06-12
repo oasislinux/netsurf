@@ -21,12 +21,13 @@
 #include <math.h>
 
 #include <ft2build.h>
-#include FT_FREETYPE_H
 #include FT_BITMAP_H
 #include FT_CACHE_H
-#include FT_SIZES_H
+#include FT_FREETYPE_H
 #include FT_GLYPH_H
 #include FT_OUTLINE_H
+#include FT_SIZES_H
+#include FT_STROKER_H
 
 #include "utils/errors.h"
 #include "utils/filepath.h"
@@ -820,8 +821,156 @@ err0:
 static nserror
 plot_path(const struct redraw_context *ctx, const plot_style_t *style, const float *p, unsigned int n, float width, const float transform[6])
 {
-	LOG("plot_path\n");
-	return NSERROR_NOT_IMPLEMENTED;
+	FT_Outline outline = {.flags = FT_OUTLINE_OWNER};
+	FT_Stroker stroker = NULL;
+	FT_Matrix mat = {
+		transform[0] * 65536, transform[1] * 65536,
+		transform[2] * 65536, transform[3] * 65536,
+	};
+	FT_Vector t = {transform[4] * 64, -transform[5] * 64};
+	FT_UInt ncontours, npoints;
+	nserror err = NSERROR_OK;
+	int i, start;
+
+	/* fill */
+	if (style->fill_colour != NS_TRANSPARENT) {
+		outline.points = reallocarray(NULL, sizeof(outline.points[0]), n);
+		outline.tags = reallocarray(NULL, sizeof(outline.tags[0]), n);
+		outline.contours = reallocarray(NULL, sizeof(outline.contours[0]), n / 3);
+		if (!outline.points || !outline.tags || !outline.contours) {
+			err = NSERROR_NOMEM;
+			goto err;
+		}
+		outline.n_points = 0;
+		outline.n_contours = 0;
+		for (i = 0; i < n; ++i) {
+			switch ((int)p[i]) {
+			case PLOTTER_PATH_MOVE:
+				if (outline.n_contours)
+					outline.contours[outline.n_contours - 1] = outline.n_points - 1;
+				++outline.n_contours;
+				outline.tags[outline.n_points] = 1;
+				outline.points[outline.n_points++] = (FT_Vector){p[i+1] * 64, -p[i+2] * 64};
+				i += 2;
+				break;
+			case PLOTTER_PATH_LINE:
+				outline.tags[outline.n_points] = 1;
+				outline.points[outline.n_points++] = (FT_Vector){p[i+1] * 64, -p[i+2] * 64};
+				i += 2;
+				break;
+			case PLOTTER_PATH_BEZIER:
+				outline.tags[outline.n_points] = 2;
+				outline.points[outline.n_points++] = (FT_Vector){p[i+1] * 64, -p[i+2] * 64};
+				outline.tags[outline.n_points] = 2;
+				outline.points[outline.n_points++] = (FT_Vector){p[i+3] * 64, -p[i+4] * 64};
+				outline.tags[outline.n_points] = 1;
+				outline.points[outline.n_points++] = (FT_Vector){p[i+5] * 64, -p[i+6] * 64};
+				i += 6;
+				break;
+			}
+		}
+		outline.contours[outline.n_contours - 1] = outline.n_points - 1;
+		if (mat.xx != 1<<16 || mat.xy != 0 || mat.yx != 0 || mat.yy != 1<<16)
+			FT_Outline_Transform(&outline, &mat);
+		if (t.x || t.y)
+			FT_Outline_Translate(&outline, t.x, t.y);
+		err = plotoutline(&outline, style->fill_colour);
+		if (err != NSERROR_OK)
+			goto err;
+	}
+
+	free(outline.points);
+	free(outline.tags);
+	free(outline.contours);
+	outline.points = NULL;
+	outline.tags = NULL;
+	outline.contours = NULL;
+
+	/* stroke */
+	if (style->stroke_colour != NS_TRANSPARENT) {
+		err = fterror(FT_Stroker_New(library, &stroker));
+		if (err)
+			goto err;
+		FT_Stroker_Set(stroker, width * 32, FT_STROKER_LINECAP_BUTT, FT_STROKER_LINEJOIN_BEVEL, 0);
+		/* Ugh, if we could specify closed in FT_Stroker_EndSubPath, we
+		   wouldn't have to do this extra traversal and allocation. */
+		if (!outline.tags) {
+			outline.tags = reallocarray(NULL, sizeof(outline.tags[0]), n);
+			if (!outline.tags) {
+				err = NSERROR_NOMEM;
+				goto err;
+			}
+		}
+		for (i = 0; i < n; ++i) {
+			switch ((int)p[i]) {
+			case PLOTTER_PATH_MOVE:
+				outline.tags[i] = 1;
+				start = i;
+				i += 2;
+				break;
+			case PLOTTER_PATH_CLOSE:
+				outline.tags[start] = 0;
+				break;
+			case PLOTTER_PATH_LINE:
+				i += 2;
+				break;
+			case PLOTTER_PATH_BEZIER:
+				i += 6;
+				break;
+			}
+		}
+		for (i = 0; i < n; ++i) {
+			switch ((int)p[i]) {
+			case PLOTTER_PATH_MOVE:
+				if (i)
+					FT_Stroker_EndSubPath(stroker);
+				FT_Stroker_BeginSubPath(stroker, &(FT_Vector){p[i+1] * 64, -p[i+2] * 64}, outline.tags[i]);
+				i += 2;
+				break;
+			case PLOTTER_PATH_LINE:
+				FT_Stroker_LineTo(stroker, &(FT_Vector){p[i+1] * 64, -p[i+2] * 64});
+				i += 2;
+				break;
+			case PLOTTER_PATH_BEZIER:
+				FT_Stroker_CubicTo(stroker,
+					&(FT_Vector){p[i+1] * 64, -p[i+2] * 64},
+					&(FT_Vector){p[i+3] * 64, -p[i+4] * 64},
+					&(FT_Vector){p[i+5] * 64, -p[i+6] * 64});
+				i += 6;
+				break;
+			}
+		}
+		FT_Stroker_EndSubPath(stroker);
+		err = fterror(FT_Stroker_GetCounts(stroker, &npoints, &ncontours));
+		if (err != NSERROR_OK)
+			goto err;
+		free(outline.tags);
+		outline.points = reallocarray(NULL, sizeof(outline.points[0]), npoints);
+		outline.tags = reallocarray(NULL, sizeof(outline.tags[0]), npoints);
+		outline.contours = reallocarray(NULL, sizeof(outline.contours[0]), ncontours);
+		if (!outline.points || !outline.tags || !outline.contours) {
+			err = NSERROR_NOMEM;
+			goto err;
+		}
+		outline.n_points = 0;
+		outline.n_contours = 0;
+		FT_Stroker_Export(stroker, &outline);
+		if (mat.xx != 1<<16 || mat.xy != 0 || mat.yx != 0 || mat.yy != 1<<16)
+			FT_Outline_Transform(&outline, &mat);
+		if (t.x || t.y)
+			FT_Outline_Translate(&outline, t.x, t.y);
+		err = plotoutline(&outline, style->stroke_colour);
+		if (err != NSERROR_OK)
+			goto err;
+	}
+
+err:
+	FT_Stroker_Done(stroker);
+	free(outline.points);
+	free(outline.tags);
+	free(outline.contours);
+
+	return err;
 }
 
 static nserror
