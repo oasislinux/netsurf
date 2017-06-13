@@ -623,12 +623,12 @@ static nserror
 window_set_scroll(struct gui_window *g, const struct rect *r)
 {
 	struct element *e = &g->ui[UI_CONTENT];
-	int sx, sy;
+	int sx = 0, sy = 0;
 
-	sx = max(r->x0, 0);
-	sy = max(r->y0, 0);
-	sx = min(sx, g->extent.w - rectwidth(&e->r));
-	sy = min(sy, g->extent.h - rectheight(&e->r));
+	if (g->extent.w > rectwidth(&e->r))
+		sx = min(max(r->x0, 0), g->extent.w - rectwidth(&e->r));
+	if (g->extent.h > rectheight(&e->r))
+		sy = min(max(r->y0, 0), g->extent.h - rectheight(&e->r));
 	if (g->scroll.x != sx || g->scroll.y != sy) {
 		g->scroll.x = sx;
 		g->scroll.y = sy;
@@ -678,9 +678,12 @@ window_update_extent(struct gui_window *g)
 		} else {
 			scrollbar_set_extents(g->scroll.v, -1, -1, g->extent.h);
 		}
-	} else if (!e->hidden) {
-		e->hidden = true;
-		g->ui[UI_CONTENT].r.x1 += SCROLLBAR_WIDTH;
+	} else {
+		if (!e->hidden) {
+			e->hidden = true;
+			g->ui[UI_CONTENT].r.x1 += SCROLLBAR_WIDTH;
+		}
+		g->scroll.y = 0;
 	}
 
 	e = &g->ui[UI_HSCROLL];
@@ -696,9 +699,12 @@ window_update_extent(struct gui_window *g)
 		} else {
 			scrollbar_set_extents(g->scroll.h, -1, -1, g->extent.w);
 		}
-	} else if (!e->hidden) {
-		e->hidden = true;
-		g->ui[UI_CONTENT].r.y1 += SCROLLBAR_WIDTH;
+	} else {
+		if (!e->hidden) {
+			e->hidden = true;
+			g->ui[UI_CONTENT].r.y1 += SCROLLBAR_WIDTH;
+		}
+		g->scroll.x = 0;
 	}
 
 	if (reformat) {
