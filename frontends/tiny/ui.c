@@ -185,6 +185,46 @@ placecaret(struct gui_window *g, int x0, int y0, int x, int y, int h, const stru
 }
 
 static void
+setkbdfocus(struct gui_window *g, int focus)
+{
+	if (g->kbd.focus == focus)
+		return;
+
+	switch (g->kbd.focus) {
+	case UI_CONTENT:
+		browser_window_remove_caret(g->bw, false);
+		break;
+	case UI_URL:
+		textarea_clear_selection(g->url);
+		textarea_set_caret(g->url, -1);
+		break;
+	}
+
+	g->kbd.focus = focus;
+}
+
+static void
+setptrfocus(struct gui_window *g, int focus)
+{
+	if (g->ptr.focus == focus)
+		return;
+
+	switch (focus) {
+	case UI_URL:
+		platform_window_set_pointer(g->platform, GUI_POINTER_CARET);
+		break;
+	case UI_BUTTONS:
+	case UI_HSCROLL:
+	case UI_VSCROLL:
+		platform_window_set_pointer(g->platform, GUI_POINTER_DEFAULT);
+		platform_window_set_pointer(g->platform, GUI_POINTER_DEFAULT);
+		break;
+	}
+
+	g->ptr.focus = focus;
+}
+
+static void
 navigate(struct gui_window *g)
 {
 	struct nsurl *url;
@@ -210,8 +250,7 @@ navigate(struct gui_window *g)
 	if (err != NSERROR_OK)
 		return;
 	browser_window_navigate(g->bw, url, NULL, BW_NAVIGATE_HISTORY, NULL, NULL, NULL);
-	textarea_set_caret(g->url, -1);
-	g->kbd.focus = UI_CONTENT;
+	setkbdfocus(g, UI_CONTENT);
 }
 
 /**** buttons ****/
@@ -926,33 +965,9 @@ mousefocus(struct gui_window *g, bool click)
 		if (e->hidden)
 			continue;
 		if (rectcontains(&e->r, g->ptr.x, g->ptr.y)) {
-			// TODO: Some sort of focus change mechanism?
-			if (g->ptr.focus != i) {
-				g->ptr.focus = i;
-				switch (i) {
-				case UI_URL:
-					platform_window_set_pointer(g->platform, GUI_POINTER_CARET);
-					break;
-				case UI_BUTTONS:
-				case UI_HSCROLL:
-				case UI_VSCROLL:
-					platform_window_set_pointer(g->platform, GUI_POINTER_DEFAULT);
-					platform_window_set_pointer(g->platform, GUI_POINTER_DEFAULT);
-					break;
-				}
-			}
-			if (click && g->kbd.focus != i && i != UI_HSCROLL && i != UI_VSCROLL) {
-				switch (g->kbd.focus) {
-				case UI_URL:
-					textarea_clear_selection(g->url);
-					textarea_set_caret(g->url, -1);
-					break;
-				case UI_CONTENT:
-					browser_window_remove_caret(g->bw, false);
-					break;
-				}
-				g->kbd.focus = i;
-			}
+			setptrfocus(g, i);
+			if (click && i != UI_HSCROLL && i != UI_VSCROLL)
+				setkbdfocus(g, i);
 		}
 	}
 }
