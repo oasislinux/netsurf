@@ -89,6 +89,7 @@ static FTC_CMapCache cmapcache;
 static struct faceid *faces[FACE_COUNT];
 static pixman_glyph_cache_t *glyphcache;
 static pixman_image_t *target;
+static pixman_image_t *iconmask;
 static struct rect curclip;
 
 /* font handling */
@@ -623,6 +624,17 @@ err0:
 	return err;
 }
 
+nserror
+ploticon(struct bitmap *bitmap, int x, int y, bool active)
+{
+	pixman_image_t *image = (void *)bitmap;
+	int w, h;
+
+	w = pixman_image_get_width(image);
+	h = pixman_image_get_height(image);
+	pixman_image_composite32(PIXMAN_OP_OVER, image, active ? NULL : iconmask, target, 0, 0, 0, 0, x, y, w, h);
+}
+
 // TODO: utilize redraw_context
 
 static nserror
@@ -1083,23 +1095,31 @@ render_init(void)
 	nserror err;
 
 	glyphcache = pixman_glyph_cache_create();
-	if (!glyphcache)
-		return NSERROR_NOMEM;
+	if (!glyphcache) {
+		err = NSERROR_NOMEM;
+		goto err0;
+	}
+
+	iconmask = pixman_image_create_solid_fill(&(pixman_color_t){.alpha=0x4000});
+	if (!iconmask) {
+		err = NSERROR_NOMEM;
+		goto err1;
+	}
 
 	err = fterror(FT_Init_FreeType(&library));
 	if (err)
-		goto err1;
+		goto err2;
 	// TODO: Tweak this parameters.
 	err = fterror(FTC_Manager_New(library, 6, 10, 2048 * 1024, requester, NULL, &manager));
 	if (err)
-		goto err2;
+		goto err3;
 	err = fterror(FTC_CMapCache_New(manager, &cmapcache));
 	if (err)
-		goto err3;
+		goto err4;
 
 	face = newface(nsoption_charp(tiny_face_sans_serif), TINY_FONT_SANS_SERIF);
 	if (!face)
-		goto err3;
+		goto err4;
 	faces[FACE_SANS_SERIF] = face;
 
 	face = newface(nsoption_charp(tiny_face_sans_serif_bold), TINY_FONT_SANS_SERIF_BOLD);
@@ -1131,12 +1151,16 @@ render_init(void)
 
 	return NSERROR_OK;
 
-err3:
+err4:
 	FTC_Manager_Done(manager);
-err2:
+err3:
 	FT_Done_FreeType(library);
+err2:
+	pixman_image_unref(iconmask);
 err1:
-	return NSERROR_UNKNOWN;
+	pixman_glyph_cache_destroy(glyphcache);
+err0:
+	return err;
 }
 
 void

@@ -259,28 +259,27 @@ buttons_redraw(struct gui_window *g, struct element *e, struct rect *clip, const
 {
 	plot_style_t style = {
 		.fill_colour = WINDOW_BACKGROUND,
-		.stroke_colour = 0x999999,
+		.stroke_colour = WINDOW_BORDER,
 		.stroke_width = 1,
 	};
-	int buttons[] = {
-		ICON_BACK,
-		ICON_FORWARD,
-		ICON_HOME,
-		ICON_RELOAD,
-	};
 	struct bitmap *b;
-	int i, w, h;
+	bool back, forward;
+	int x;
 
-	if (g->throbbing)
-		buttons[3] = ICON_STOP;
 	ctx->plot->clip(NULL, clip);
 	ctx->plot->rectangle(NULL, &style, &e->r);
-	for (i = 0; i < sizeof(buttons) / sizeof(buttons[0]); ++i) {
-		b = tiny_icons[buttons[i]];
-		w = tiny_bitmap_table->get_width(b);
-		h = tiny_bitmap_table->get_height(b);
-		ctx->plot->bitmap(NULL, b, e->r.x0 + i * w, e->r.y0, w, h, style.fill_colour, 0);
-	}
+	back = browser_window_history_back_available(g->bw);
+	forward = browser_window_history_forward_available(g->bw);
+
+	x = e->r.x0;
+	ploticon(tiny_icons[ICON_BACK], x, e->r.y0, back);
+	x += TOOLBAR_SIZE;
+	ploticon(tiny_icons[ICON_FORWARD], x, e->r.y0, forward);
+	x += TOOLBAR_SIZE;
+	ploticon(tiny_icons[g->throbbing ? ICON_STOP : ICON_HOME], x, e->r.y0, true);
+	x += TOOLBAR_SIZE;
+	ploticon(tiny_icons[ICON_RELOAD], x, e->r.y0, true);
+
 	ctx->plot->line(NULL, &style, &(struct rect){e->r.x0, e->r.y1 - 1, e->r.x1, e->r.y1 - 1});
 }
 
