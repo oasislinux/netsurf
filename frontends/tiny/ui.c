@@ -1117,7 +1117,7 @@ gui_window_key(struct gui_window *g, xkb_keysym_t sym, bool pressed)
 void
 gui_window_axis(struct gui_window *g, bool vert, int amount)
 {
-	struct element *e;
+	struct element *e, *se;
 	struct scrollbar *s;
 	int x, y, dx, dy;
 
@@ -1131,17 +1131,19 @@ gui_window_axis(struct gui_window *g, bool vert, int amount)
 
 	if (vert) {
 		s = g->scroll.v;
+		se = &g->ui[UI_VSCROLL];
 		dx = 0;
 		dy = amount;
 	} else {
 		s = g->scroll.h;
+		se = &g->ui[UI_HSCROLL];
 		dx = amount;
 		dy = 0;
 	}
 	if (browser_window_scroll_at_point(g->bw, x, y, dx, dy))
 		return;
 
-	if (scrollbar_scroll(s, amount))
+	if (!se->hidden && scrollbar_scroll(s, amount))
 		platform_window_update(g->platform, &g->ui[vert ? UI_VSCROLL : UI_HSCROLL].r);
 }
 
