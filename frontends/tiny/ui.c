@@ -46,7 +46,8 @@
 #include "tiny/platform.h"
 #include "tiny/render.h"
 
-#define TOOLBAR_SIZE 24
+#define ICON_SIZE 24
+#define TOOLBAR_HEIGHT ICON_SIZE
 #define STATUS_HEIGHT 16
 
 #define BROWSER_CLICK (\
@@ -273,11 +274,11 @@ buttons_redraw(struct gui_window *g, struct element *e, struct rect *clip, const
 
 	x = e->r.x0;
 	ploticon(tiny_icons[ICON_BACK], x, e->r.y0, back);
-	x += TOOLBAR_SIZE;
+	x += ICON_SIZE;
 	ploticon(tiny_icons[ICON_FORWARD], x, e->r.y0, forward);
-	x += TOOLBAR_SIZE;
+	x += ICON_SIZE;
 	ploticon(tiny_icons[g->throbbing ? ICON_STOP : ICON_HOME], x, e->r.y0, true);
-	x += TOOLBAR_SIZE;
+	x += ICON_SIZE;
 	ploticon(tiny_icons[ICON_RELOAD], x, e->r.y0, true);
 
 	ctx->plot->line(NULL, &style, &(struct rect){e->r.x0, e->r.y1 - 1, e->r.x1, e->r.y1 - 1});
@@ -293,7 +294,7 @@ buttons_mouse(struct gui_window *g, struct element *e, browser_mouse_state state
 	if (!(state & BROWSER_MOUSE_CLICK_1))
 		return;
 
-	switch (x / TOOLBAR_SIZE) {
+	switch (x / ICON_SIZE) {
 	case 0:
 		browser_window_history_back(g->bw, false);
 		break;
@@ -702,7 +703,7 @@ window_update_extent(struct gui_window *g)
 	if (g->extent.h > rectheight(&g->ui[UI_CONTENT].r)) {
 		if (e->hidden) {
 			e->hidden = false;
-			e->r = (struct rect){w - SCROLLBAR_WIDTH, TOOLBAR_SIZE, w, h - STATUS_HEIGHT};
+			e->r = (struct rect){w - SCROLLBAR_WIDTH, TOOLBAR_HEIGHT, w, h - STATUS_HEIGHT};
 			g->ui[UI_CONTENT].r.x1 -= SCROLLBAR_WIDTH;
 			scrollbar_set_extents(g->scroll.v, rectheight(&e->r), rectheight(&g->ui[UI_CONTENT].r), g->extent.h);
 			reformat = true;
@@ -848,9 +849,9 @@ gui_window_reformat(struct gui_window *g, int w, int h)
 	g->width = w;
 	g->height = h;
 
-	g->ui[UI_BUTTONS].r = (struct rect){0, 0, TOOLBAR_SIZE * 4, TOOLBAR_SIZE};
-	g->ui[UI_URL].r = (struct rect){TOOLBAR_SIZE * 4, 0, w, TOOLBAR_SIZE};
-	g->ui[UI_CONTENT].r = (struct rect){0, TOOLBAR_SIZE, w, h - STATUS_HEIGHT};
+	g->ui[UI_BUTTONS].r = (struct rect){0, 0, ICON_SIZE * 4, TOOLBAR_HEIGHT};
+	g->ui[UI_URL].r = (struct rect){ICON_SIZE * 4, 0, w, TOOLBAR_HEIGHT};
+	g->ui[UI_CONTENT].r = (struct rect){0, TOOLBAR_HEIGHT, w, h - STATUS_HEIGHT};
 	g->ui[UI_STATUS].r = (struct rect){0, h - STATUS_HEIGHT, w, h};
 	g->ui[UI_HSCROLL].hidden = true;
 	g->ui[UI_VSCROLL].hidden = true;
