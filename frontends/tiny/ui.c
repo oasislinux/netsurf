@@ -660,22 +660,10 @@ window_get_scroll(struct gui_window *g, int *sx, int *sy)
 static nserror
 window_set_scroll(struct gui_window *g, const struct rect *r)
 {
-	struct element *e = &g->ui[UI_CONTENT];
-	int sx = 0, sy = 0;
-
-	if (g->extent.w > rectwidth(&e->r))
-		sx = min(max(r->x0, 0), g->extent.w - rectwidth(&e->r));
-	if (g->extent.h > rectheight(&e->r))
-		sy = min(max(r->y0, 0), g->extent.h - rectheight(&e->r));
-	if (g->scroll.x != sx || g->scroll.y != sy) {
-		g->scroll.x = sx;
-		g->scroll.y = sy;
-		scrollbar_set(g->scroll.h, sx, false);
-		scrollbar_set(g->scroll.v, sy, false);
-		platform_window_update(g->platform, &e->r);
-		platform_window_update(g->platform, &g->ui[UI_HSCROLL].r);
-		platform_window_update(g->platform, &g->ui[UI_VSCROLL].r);
-	}
+	if (!g->ui[UI_HSCROLL].hidden)
+		scrollbar_set(g->scroll.h, r->x0, false);
+	if (!g->ui[UI_VSCROLL].hidden)
+		scrollbar_set(g->scroll.v, r->y0, false);
 
 	return NSERROR_OK;
 }
