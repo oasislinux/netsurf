@@ -1050,7 +1050,7 @@ gui_window_key(struct gui_window *g, xkb_keysym_t sym, bool pressed)
 		key = NS_KEY_PAGE_UP;
 		break;
 	case XKB_KEY_Page_Down:
-		key = NS_KEY_PAGE_UP;
+		key = NS_KEY_PAGE_DOWN;
 		break;
 	case XKB_KEY_Right:
 		if (mods & BROWSER_MOUSE_MOD_2)
