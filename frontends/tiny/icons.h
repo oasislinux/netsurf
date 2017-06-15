@@ -27,6 +27,8 @@ enum {
 	ICON_HOME,
 	ICON_STOP,
 	ICON_RELOAD,
+	ICON_UP,
+	ICON_DOWN,
 
 	NUM_ICONS,
 };

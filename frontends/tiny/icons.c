@@ -109,6 +109,12 @@ nserror icons_init(void)
 	err = loadicon("icons/reload.ff", (void *)&tiny_icons[ICON_RELOAD]);
 	if (err)
 		return err;
+	err = loadicon("icons/up.ff", (void *)&tiny_icons[ICON_UP]);
+	if (err)
+		return err;
+	err = loadicon("icons/down.ff", (void *)&tiny_icons[ICON_DOWN]);
+	if (err)
+		return err;
 
 	return NSERROR_OK;
 }
