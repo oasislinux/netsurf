@@ -49,6 +49,8 @@
 #define ICON_SIZE 24
 #define TOOLBAR_HEIGHT ICON_SIZE
 #define STATUS_HEIGHT 16
+#define SEARCH_WIDTH 200
+#define SEARCH_HEIGHT ICON_SIZE
 
 #define BROWSER_CLICK (\
 	BROWSER_MOUSE_PRESS_1|BROWSER_MOUSE_PRESS_2|\
@@ -57,12 +59,15 @@
 )
 
 /* colors */
-#define WINDOW_BACKGROUND 0xeeeeee
-#define WINDOW_BORDER     0x999999
-#define URL_BACKGROUND    0xffffea
-#define URL_BACKGROUND_HL 0xeeee9e
-#define URL_BORDER        0xcc8888
-#define CARET_STROKE      0x000000
+#define WINDOW_BACKGROUND    0xeeeeee
+#define WINDOW_BORDER        0x999999
+#define URL_BACKGROUND       0xffffea
+#define URL_BACKGROUND_HL    0xeeee9e
+#define URL_BORDER           0xcc8888
+#define SEARCH_BACKGROUND    0xeaffff
+#define SEARCH_BACKGROUND_HL 0x9eeeee
+#define SEARCH_BORDER        0x4c9999
+#define CARET_STROKE         0x000000
 
 enum {
 	UI_BUTTONS,
@@ -71,6 +76,7 @@ enum {
 	UI_HSCROLL,
 	UI_VSCROLL,
 	UI_STATUS,
+	UI_SEARCH,
 
 	UI_NUMELEMENTS,
 };
@@ -120,6 +126,12 @@ struct gui_window {
 		struct scrollbar *h, *v;
 		bool hdrag, vdrag;
 	} scroll;
+
+	struct {
+		struct textarea *box;
+		char *text;
+		bool prev, next, found;
+	} search;
 
 	struct {
 		int w, h;
@@ -199,6 +211,14 @@ setkbdfocus(struct gui_window *g, int focus)
 		textarea_clear_selection(g->url);
 		textarea_set_caret(g->url, -1);
 		break;
+	case UI_SEARCH:
+		g->ui[UI_SEARCH].hidden = true;
+		g->search.found = false;
+		browser_window_search_clear(g->bw);
+		textarea_clear_selection(g->search.box);
+		textarea_set_caret(g->search.box, -1);
+		platform_window_update(g->platform, &g->ui[UI_SEARCH].r);
+		break;
 	}
 
 	g->kbd.focus = focus;
@@ -253,6 +273,43 @@ navigate(struct gui_window *g)
 	browser_window_navigate(g->bw, url, NULL, BW_NAVIGATE_HISTORY, NULL, NULL, NULL);
 	setkbdfocus(g, UI_CONTENT);
 }
+
+static bool
+textcallback(struct gui_window *g, int id, struct textarea_msg *msg)
+{
+	const struct rect *r = &g->ui[id].r;
+	int x, y, h;
+
+	switch (msg->type) {
+	case TEXTAREA_MSG_REDRAW_REQUEST:
+		platform_window_update(g->platform, &(struct rect){
+			msg->data.redraw.x0 + r->x0, msg->data.redraw.y0 + r->y0,
+			msg->data.redraw.x1 + r->x0, msg->data.redraw.y1 + r->y0,
+		});
+		break;
+	case TEXTAREA_MSG_CARET_UPDATE:
+		switch (msg->data.caret.type) {
+		case TEXTAREA_CARET_SET_POS:
+			if (g->kbd.focus == id) {
+				x = msg->data.caret.pos.x;
+				y = msg->data.caret.pos.y;
+				h = msg->data.caret.pos.height;
+				placecaret(g, r->x0, r->y0, x, y, h, msg->data.caret.pos.clip);
+			}
+			break;
+		case TEXTAREA_CARET_HIDE:
+			if (g->kbd.focus == id)
+				removecaret(g);
+			break;
+		}
+		break;
+	default:
+		return false;
+	}
+
+	return true;
+}
+
 
 /**** buttons ****/
 static void
@@ -328,40 +385,8 @@ static const struct elementimpl buttonsimpl = {
 static void urlcallback(void *data, struct textarea_msg *msg)
 {
 	struct gui_window *g = data;
-	const struct rect *r = &g->ui[UI_URL].r;
-	int x, y, h;
 
-	switch (msg->type) {
-	case TEXTAREA_MSG_REDRAW_REQUEST:
-		platform_window_update(g->platform, &(struct rect){
-			msg->data.redraw.x0 + r->x0, msg->data.redraw.y0 + r->y0,
-			msg->data.redraw.x1 + r->x0, msg->data.redraw.y1 + r->y0,
-		});
-		break;
-	case TEXTAREA_MSG_CARET_UPDATE:
-		switch (msg->data.caret.type) {
-		case TEXTAREA_CARET_SET_POS:
-			if (g->kbd.focus == UI_URL) {
-				x = msg->data.caret.pos.x;
-				y = msg->data.caret.pos.y;
-				h = msg->data.caret.pos.height;
-				placecaret(g, r->x0, r->y0, x, y, h, msg->data.caret.pos.clip);
-			}
-			break;
-		case TEXTAREA_CARET_HIDE:
-			if (g->kbd.focus == UI_URL)
-				removecaret(g);
-			break;
-		}
-		break;
-	case TEXTAREA_MSG_TEXT_MODIFIED:
-		break;
-	case TEXTAREA_MSG_SELECTION_REPORT:
-		LOG("selection report\n");
-		break;
-	default:
-		break;
-	}
+	textcallback(g, UI_URL, msg);
 }
 
 static void
@@ -567,6 +592,81 @@ static const struct elementimpl statusimpl = {
 	.redraw = status_redraw,
 };
 
+/**** search box ****/
+static void searchcallback(void *data, struct textarea_msg *msg)
+{
+	struct gui_window *g = data;
+
+	if (textcallback(g, UI_SEARCH, msg))
+		return;
+	if (msg->type != TEXTAREA_MSG_TEXT_MODIFIED)
+		return;
+	free(g->search.text);
+	g->search.text = malloc(msg->data.modified.len);
+	if (!g->search.text)
+		return;
+	memcpy(g->search.text, msg->data.modified.text, msg->data.modified.len);
+	if (g->search.text[0])
+		browser_window_search(g->bw, g, SEARCH_FLAG_FORWARDS, g->search.text);
+}
+
+static void
+search_redraw(struct gui_window *g, struct element *e, struct rect *clip, const struct redraw_context *ctx)
+{
+	plot_style_t style = {
+		.fill_colour = WINDOW_BACKGROUND,
+		.stroke_colour = WINDOW_BORDER,
+		.stroke_width = 1,
+	};
+	int x = e->r.x1 - 2 * ICON_SIZE;
+
+	textarea_redraw(g->search.box, e->r.x0, e->r.y0, 0xffffff, 1, clip, ctx);
+	ctx->plot->rectangle(NULL, &style, &(struct rect){x, e->r.y0, e->r.x1, e->r.y1});
+	ctx->plot->line(NULL, &style, &(struct rect){x, e->r.y1 - 1, e->r.x1, e->r.y1 - 1});
+	ctx->plot->line(NULL, &style, &(struct rect){x, e->r.y0, e->r.x1, e->r.y0});
+	ploticon(tiny_icons[ICON_UP], x, e->r.y0, g->search.found && g->search.prev);
+	x += ICON_SIZE;
+	ploticon(tiny_icons[ICON_DOWN], x, e->r.y0, g->search.found && g->search.next);
+}
+
+static void
+search_mouse(struct gui_window *g, struct element *e, browser_mouse_state state, int x, int y)
+{
+	if (x > SEARCH_WIDTH - ICON_SIZE * 2) {
+		switch ((x - (SEARCH_WIDTH - ICON_SIZE * 2)) / ICON_SIZE) {
+		case 0:
+			browser_window_search(g->bw, g, SEARCH_FLAG_BACKWARDS, g->search.text);
+			return;
+		case 1:
+			browser_window_search(g->bw, g, SEARCH_FLAG_FORWARDS, g->search.text);
+			return;
+		}
+	} else {
+		textarea_mouse_action(g->search.box, state, x, y);
+	}
+}
+
+static void
+search_key(struct gui_window *g, struct element *e, uint32_t key)
+{
+	switch (key) {
+	case '\r':
+		browser_window_search(g->bw, g, SEARCH_FLAG_FORWARDS, g->search.text);
+		break;
+	case '\e':
+		setkbdfocus(g, UI_CONTENT);
+		break;
+	default:
+		textarea_keypress(g->search.box, key);
+	}
+}
+
+static const struct elementimpl searchimpl = {
+	.redraw = search_redraw,
+	.mouse = search_mouse,
+	.key = search_key,
+};
+
 /**** gui_window implementation ****/
 static struct gui_window *
 window_create(struct browser_window *bw, struct gui_window *existing, gui_window_create_flags flags)
@@ -578,13 +678,10 @@ window_create(struct browser_window *bw, struct gui_window *existing, gui_window
 		.pad_bottom = 0,
 		.pad_left = 2,
 		.border_width = 1,
-		.border_col = URL_BORDER,
-		.selected_bg = URL_BACKGROUND_HL,
 		.text = {
 			.family = PLOT_FONT_FAMILY_SANS_SERIF,
 			.size = 12 * FONT_SIZE_SCALE,
 			.weight = 400,
-			.background = URL_BACKGROUND,
 		},
 	};
 	nserror err;
@@ -592,18 +689,27 @@ window_create(struct browser_window *bw, struct gui_window *existing, gui_window
 	g = calloc(sizeof(*g), 1);
 	if (!g)
 		goto err0;
+	setup.border_col = URL_BORDER;
+	setup.selected_bg = URL_BACKGROUND_HL;
+	setup.text.background = URL_BACKGROUND;
 	g->url = textarea_create(TEXTAREA_DEFAULT, &setup, urlcallback, g);
 	if (!g->url)
 		goto err1;
+	setup.border_col = SEARCH_BORDER;
+	setup.selected_bg = SEARCH_BACKGROUND_HL;
+	setup.text.background = SEARCH_BACKGROUND;
+	g->search.box = textarea_create(TEXTAREA_DEFAULT, &setup, searchcallback, g);
+	if (!g->search.box)
+		goto err2;
 	err = scrollbar_create(true, 0, 0, 0, g, scrollcallback, &g->scroll.h);
 	if (err)
-		goto err2;
+		goto err3;
 	err = scrollbar_create(false, 0, 0, 0, g, scrollcallback, &g->scroll.v);
 	if (err)
-		goto err3;
+		goto err4;
 	g->platform = platform_window_create(g);
 	if (!g->platform)
-		goto err4;
+		goto err5;
 
 	g->ui[UI_BUTTONS] = (struct element){.impl = &buttonsimpl};
 	g->ui[UI_URL] = (struct element){.impl = &urlimpl};
@@ -611,6 +717,7 @@ window_create(struct browser_window *bw, struct gui_window *existing, gui_window
 	g->ui[UI_HSCROLL] = (struct element){.impl = &scrollimpl, .hidden = true};
 	g->ui[UI_VSCROLL] = (struct element){.impl = &scrollimpl, .hidden = true};
 	g->ui[UI_STATUS] = (struct element){.impl = &statusimpl};
+	g->ui[UI_SEARCH] = (struct element){.impl = &searchimpl, .hidden = true};
 	g->bw = bw;
 
 	g->ptr.focus = UI_CONTENT;
@@ -618,10 +725,12 @@ window_create(struct browser_window *bw, struct gui_window *existing, gui_window
 
 	return g;
 
-err4:
+err5:
 	scrollbar_destroy(g->scroll.v);
-err3:
+err4:
 	scrollbar_destroy(g->scroll.h);
+err3:
+	textarea_destroy(g->search.box);
 err2:
 	textarea_destroy(g->url);
 err1:
@@ -705,6 +814,8 @@ window_update_extent(struct gui_window *g)
 			e->hidden = false;
 			e->r = (struct rect){w - SCROLLBAR_WIDTH, TOOLBAR_HEIGHT, w, h - STATUS_HEIGHT};
 			g->ui[UI_CONTENT].r.x1 -= SCROLLBAR_WIDTH;
+			g->ui[UI_SEARCH].r.x0 -= SCROLLBAR_WIDTH;
+			g->ui[UI_SEARCH].r.x1 -= SCROLLBAR_WIDTH;
 			scrollbar_set_extents(g->scroll.v, rectheight(&e->r), rectheight(&g->ui[UI_CONTENT].r), g->extent.h);
 			reformat = true;
 		} else {
@@ -714,6 +825,8 @@ window_update_extent(struct gui_window *g)
 		if (!e->hidden) {
 			e->hidden = true;
 			g->ui[UI_CONTENT].r.x1 += SCROLLBAR_WIDTH;
+			g->ui[UI_SEARCH].r.x0 += SCROLLBAR_WIDTH;
+			g->ui[UI_SEARCH].r.x1 += SCROLLBAR_WIDTH;
 		}
 		g->scroll.y = 0;
 	}
@@ -855,12 +968,16 @@ gui_window_reformat(struct gui_window *g, int w, int h)
 	g->ui[UI_STATUS].r = (struct rect){0, h - STATUS_HEIGHT, w, h};
 	g->ui[UI_HSCROLL].hidden = true;
 	g->ui[UI_VSCROLL].hidden = true;
+	g->ui[UI_SEARCH].r = (struct rect){w - SEARCH_WIDTH, TOOLBAR_HEIGHT, w, TOOLBAR_HEIGHT + SEARCH_HEIGHT};
 
 	r = &g->ui[UI_URL].r;
 	textarea_set_dimensions(g->url, rectwidth(r), rectheight(r));
 
 	r = &g->ui[UI_CONTENT].r;
 	browser_window_reformat(g->bw, false, rectwidth(r), rectheight(r));
+
+	r = &g->ui[UI_SEARCH].r;
+	textarea_set_dimensions(g->search.box, rectwidth(r) - 2 * ICON_SIZE, rectheight(r));
 }
 
 void
@@ -1042,10 +1159,24 @@ gui_window_key(struct gui_window *g, xkb_keysym_t sym, bool pressed)
 
 	mods = platform_window_get_mods(g->platform);
 
-	if (sym == XKB_KEY_l && mods & BROWSER_MOUSE_MOD_2) {
-		g->kbd.focus = UI_URL;
-		textarea_keypress(g->url, NS_KEY_SELECT_ALL);
-		return;
+	if (mods & BROWSER_MOUSE_MOD_2) {
+		switch (sym) {
+		case XKB_KEY_l:
+			setkbdfocus(g, UI_URL);
+			textarea_keypress(g->url, NS_KEY_SELECT_ALL);
+			return;
+		case XKB_KEY_f:
+			setkbdfocus(g, UI_SEARCH);
+			if (g->ui[UI_SEARCH].hidden) {
+				g->ui[UI_SEARCH].hidden = false;
+				platform_window_update(g->platform, &g->ui[UI_SEARCH].r);
+				textarea_set_text(g->search.box, "");
+				textarea_set_caret(g->search.box, 0);
+			} else {
+				textarea_keypress(g->search.box, NS_KEY_SELECT_ALL);
+			}
+			return;
+		}
 	}
 
 	switch (sym) {
@@ -1150,33 +1281,37 @@ gui_window_axis(struct gui_window *g, bool vert, int amount)
 
 /**** gui_search implementation ****/
 static void
-search_status(bool found, void *p)
+search_status(bool found, void *data)
 {
-	LOG("search_status\n");
+	struct gui_window *g = data;
+
+	g->search.found = found;
 }
 
 static void
-search_hourglass(bool active, void *p)
+search_hourglass(bool active, void *data)
 {
-	LOG("search_hourglass\n");
 }
 
 static void
-search_add_recent(const char *string, void *p)
+search_add_recent(const char *string, void *data)
 {
-	LOG("search_add_recent\n");
 }
 
 static void
-search_forward_state(bool active, void *p)
+search_forward_state(bool active, void *data)
 {
-	LOG("search_forward_state\n");
+	struct gui_window *g = data;
+
+	g->search.next = active;
 }
 
 static void
-search_back_state(bool active, void *p)
+search_back_state(bool active, void *data)
 {
-	LOG("search_back_state\n");
+	struct gui_window *g = data;
+
+	g->search.prev = active;
 }
 
 static struct gui_search_table search_table = {
