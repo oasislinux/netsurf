@@ -417,12 +417,17 @@ content_mouse(struct gui_window *g, struct element *e, browser_mouse_state state
 static void
 content_key(struct gui_window *g, struct element *e, uint32_t key)
 {
+	if (browser_window_key_press(g->bw, key))
+		return;
+
 	switch (key) {
-	case 'f':
-		// TODO: implement search
+	case NS_KEY_PAGE_UP:
+		scrollbar_set(g->scroll.v, g->scroll.y - rectheight(&g->ui[UI_CONTENT].r), false);
+		break;
+	case NS_KEY_PAGE_DOWN:
+		scrollbar_set(g->scroll.v, g->scroll.y + rectheight(&g->ui[UI_CONTENT].r), false);
 		break;
 	}
-	browser_window_key_press(g->bw, key);
 }
 
 static const struct elementimpl contentimpl = {
