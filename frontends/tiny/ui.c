@@ -238,7 +238,6 @@ setptrfocus(struct gui_window *g, int focus)
 	case UI_HSCROLL:
 	case UI_VSCROLL:
 		platform_window_set_pointer(g->platform, GUI_POINTER_DEFAULT);
-		platform_window_set_pointer(g->platform, GUI_POINTER_DEFAULT);
 		break;
 	}
 
