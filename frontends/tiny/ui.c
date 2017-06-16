@@ -752,7 +752,7 @@ window_invalidate(struct gui_window *g, const struct rect *r)
 	if (r) {
 		struct rect gr = (struct rect){
 			e->r.x0 + r->x0 - g->scroll.x, e->r.y0 + r->y0 - g->scroll.y,
-			e->r.x1 + r->x1 - g->scroll.x, e->r.y1 + r->y1 - g->scroll.y,
+			e->r.x0 + r->x1 - g->scroll.x, e->r.y0 + r->y1 - g->scroll.y,
 		};
 
 		platform_window_update(g->platform, &gr);
