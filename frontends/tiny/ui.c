@@ -153,6 +153,14 @@ rectcontains(const struct rect *r, int x, int y) {
 	return r->x0 <= x && x < r->x1 && r->y0 <= y && y < r->y1;
 }
 
+static void
+rectshift(struct rect *r, int x, int y) {
+	r->x0 += x;
+	r->y0 += y;
+	r->x1 += x;
+	r->y1 += y;
+}
+
 static bool
 trimrect(struct rect *r1, const struct rect *r2)
 {
@@ -281,10 +289,8 @@ textcallback(struct gui_window *g, int id, struct textarea_msg *msg)
 
 	switch (msg->type) {
 	case TEXTAREA_MSG_REDRAW_REQUEST:
-		platform_window_update(g->platform, &(struct rect){
-			msg->data.redraw.x0 + r->x0, msg->data.redraw.y0 + r->y0,
-			msg->data.redraw.x1 + r->x0, msg->data.redraw.y1 + r->y0,
-		});
+		rectshift(&msg->data.redraw, r->x0, r->y0);
+		platform_window_update(g->platform, &msg->data.redraw);
 		break;
 	case TEXTAREA_MSG_CARET_UPDATE:
 		switch (msg->data.caret.type) {
@@ -750,11 +756,9 @@ window_invalidate(struct gui_window *g, const struct rect *r)
 	struct element *e = &g->ui[UI_CONTENT];
 
 	if (r) {
-		struct rect gr = (struct rect){
-			e->r.x0 + r->x0 - g->scroll.x, e->r.y0 + r->y0 - g->scroll.y,
-			e->r.x0 + r->x1 - g->scroll.x, e->r.y0 + r->y1 - g->scroll.y,
-		};
+		struct rect gr = *r;
 
+		rectshift(&gr, e->r.x0 - g->scroll.x, e->r.y0 - g->scroll.y);
 		platform_window_update(g->platform, &gr);
 	} else {
 		platform_window_update(g->platform, &e->r);
@@ -813,8 +817,7 @@ window_update_extent(struct gui_window *g)
 			e->hidden = false;
 			e->r = (struct rect){w - SCROLLBAR_WIDTH, TOOLBAR_HEIGHT, w, h - STATUS_HEIGHT};
 			g->ui[UI_CONTENT].r.x1 -= SCROLLBAR_WIDTH;
-			g->ui[UI_SEARCH].r.x0 -= SCROLLBAR_WIDTH;
-			g->ui[UI_SEARCH].r.x1 -= SCROLLBAR_WIDTH;
+			rectshift(&g->ui[UI_SEARCH].r, -SCROLLBAR_WIDTH, 0);
 			scrollbar_set_extents(g->scroll.v, rectheight(&e->r), rectheight(&g->ui[UI_CONTENT].r), g->extent.h);
 			reformat = true;
 		} else {
@@ -824,8 +827,7 @@ window_update_extent(struct gui_window *g)
 		if (!e->hidden) {
 			e->hidden = true;
 			g->ui[UI_CONTENT].r.x1 += SCROLLBAR_WIDTH;
-			g->ui[UI_SEARCH].r.x0 += SCROLLBAR_WIDTH;
-			g->ui[UI_SEARCH].r.x1 += SCROLLBAR_WIDTH;
+			rectshift(&g->ui[UI_SEARCH].r, SCROLLBAR_WIDTH, 0);
 		}
 		g->scroll.y = 0;
 	}
