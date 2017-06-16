@@ -162,7 +162,7 @@ rectshift(struct rect *r, int x, int y) {
 }
 
 static bool
-trimrect(struct rect *r1, const struct rect *r2)
+recttrim(struct rect *r1, const struct rect *r2)
 {
 	if (r1->x0 < r2->x0)
 		r1->x0 = min(r1->x1, r2->x0);
@@ -996,7 +996,7 @@ gui_window_redraw(struct gui_window *g, const struct rect *clip, const struct re
 		if (e->hidden)
 			continue;
 		subclip = e->r;
-		if (trimrect(&subclip, clip))
+		if (recttrim(&subclip, clip))
 			e->impl->redraw(g, e, &subclip, ctx);
 	}
 
