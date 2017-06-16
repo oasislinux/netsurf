@@ -228,12 +228,12 @@ setkbdfocus(struct gui_window *g, int focus)
 		textarea_set_caret(g->url, -1);
 		break;
 	case UI_SEARCH:
+		textarea_set_caret(g->search.box, -1);
 		g->ui[UI_SEARCH].hidden = true;
 		g->ui[UI_SEARCH_BUTTONS].hidden = true;
 		g->search.found = false;
 		browser_window_search_clear(g->bw);
-		textarea_clear_selection(g->search.box);
-		textarea_set_caret(g->search.box, -1);
+		textarea_set_text(g->search.box, "");
 		platform_window_update(g->platform, &g->ui[UI_SEARCH].r);
 		platform_window_update(g->platform, &g->ui[UI_SEARCH_BUTTONS].r);
 		break;
@@ -614,6 +614,8 @@ static void searchcallback(void *data, struct textarea_msg *msg)
 {
 	struct gui_window *g = data;
 
+	if (g->ui[UI_SEARCH].hidden)
+		return;
 	if (textcallback(g, UI_SEARCH, msg))
 		return;
 	if (msg->type != TEXTAREA_MSG_TEXT_MODIFIED)
@@ -623,8 +625,7 @@ static void searchcallback(void *data, struct textarea_msg *msg)
 	if (!g->search.text)
 		return;
 	memcpy(g->search.text, msg->data.modified.text, msg->data.modified.len);
-	if (g->search.text[0])
-		browser_window_search(g->bw, g, SEARCH_FLAG_FORWARDS, g->search.text);
+	browser_window_search(g->bw, g, SEARCH_FLAG_FORWARDS, g->search.text);
 }
 
 static void
@@ -1212,7 +1213,6 @@ gui_window_key(struct gui_window *g, xkb_keysym_t sym, bool pressed)
 				g->ui[UI_SEARCH_BUTTONS].hidden = false;
 				platform_window_update(g->platform, &g->ui[UI_SEARCH].r);
 				platform_window_update(g->platform, &g->ui[UI_SEARCH_BUTTONS].r);
-				textarea_set_text(g->search.box, "");
 				textarea_set_caret(g->search.box, 0);
 			} else {
 				textarea_keypress(g->search.box, NS_KEY_SELECT_ALL);
