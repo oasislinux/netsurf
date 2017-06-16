@@ -1109,7 +1109,7 @@ mousefocus(struct gui_window *g, bool click)
 	if (g->ptr.state & (BROWSER_MOUSE_PRESS_1 | BROWSER_MOUSE_PRESS_2 | BROWSER_MOUSE_DRAG_ON))
 		return;
 
-	for (i = 0; i < UI_NUMELEMENTS; ++i) {
+	for (i = UI_NUMELEMENTS - 1; i >= 0; --i) {
 		e = &g->ui[i];
 		if (e->hidden)
 			continue;
@@ -1117,6 +1117,7 @@ mousefocus(struct gui_window *g, bool click)
 			setptrfocus(g, i);
 			if (click)
 				setkbdfocus(g, i);
+			break;
 		}
 	}
 }
