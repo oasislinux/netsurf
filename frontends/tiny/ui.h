@@ -25,7 +25,7 @@ struct redraw_context;
 void gui_window_reformat(struct gui_window *g, int w, int h);
 void gui_window_redraw(struct gui_window *g, const struct rect *clip, const struct redraw_context *ctx);
 
-void gui_window_button(struct gui_window *g, int button, bool pressed);
+void gui_window_button(struct gui_window *g, uint32_t time, int button, bool pressed);
 void gui_window_motion(struct gui_window *g, int x, int y);
 void gui_window_key(struct gui_window *g, uint32_t key, bool pressed);
 void gui_window_axis(struct gui_window *g, bool vert, int amount);

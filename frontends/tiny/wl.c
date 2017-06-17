@@ -419,7 +419,7 @@ pointer_button(void *data, struct wl_pointer *pointer, uint32_t serial, uint32_t
 		break;
 	}
 
-	gui_window_button(p->g, b, state == WL_POINTER_BUTTON_STATE_PRESSED);
+	gui_window_button(p->g, time, b, state == WL_POINTER_BUTTON_STATE_PRESSED);
 }
 
 static void

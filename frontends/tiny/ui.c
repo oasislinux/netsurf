@@ -52,6 +52,8 @@
 #define SEARCH_WIDTH 200
 #define SEARCH_HEIGHT ICON_SIZE
 
+#define DOUBLE_CLICK_TIMEOUT 250
+
 #define BROWSER_CLICK (\
 	BROWSER_MOUSE_PRESS_1|BROWSER_MOUSE_PRESS_2|\
 	BROWSER_MOUSE_CLICK_1|BROWSER_MOUSE_CLICK_2|\
@@ -1124,8 +1126,11 @@ mousefocus(struct gui_window *g, bool click)
 }
 
 void
-gui_window_button(struct gui_window *g, int button, bool pressed)
+gui_window_button(struct gui_window *g, uint32_t time, int button, bool pressed)
 {
+	static uint32_t times[3];
+	static browser_mouse_state state[3];
+
 	if (pressed) {
 		mousefocus(g, true);
 		switch (button) {
@@ -1139,7 +1144,21 @@ gui_window_button(struct gui_window *g, int button, bool pressed)
 		default:
 			return;
 		}
-		mousedispatch(g, g->ptr.state);
+		if (time - times[button] >= DOUBLE_CLICK_TIMEOUT)
+			state[button] = 0;
+		mousedispatch(g, g->ptr.state | state[button]);
+		switch (state[button]) {
+		case 0:
+			state[button] = BROWSER_MOUSE_DOUBLE_CLICK;
+			break;
+		case BROWSER_MOUSE_DOUBLE_CLICK:
+			state[button] = BROWSER_MOUSE_TRIPLE_CLICK;
+			break;
+		case BROWSER_MOUSE_TRIPLE_CLICK:
+			state[button] = 0;
+			break;
+		}
+		times[button] = time;
 	} else {
 		switch (button) {
 		case 1:
