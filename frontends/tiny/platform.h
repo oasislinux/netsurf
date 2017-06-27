@@ -34,6 +34,9 @@ browser_mouse_state platform_window_get_mods(struct platform_window *p);
 void platform_window_set_title(struct platform_window *p, const char *title);
 void platform_window_set_pointer(struct platform_window *p, enum gui_pointer_shape shape);
 
+void platform_clipboard_set(const char *buf, size_t len);
+void platform_clipboard_get(char **buf, size_t *len);
+
 extern struct gui_clipboard_table *tiny_clipboard_table;
 
 #endif

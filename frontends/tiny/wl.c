@@ -1094,3 +1094,15 @@ static struct gui_clipboard_table clipboard_table = {
 };
 
 struct gui_clipboard_table *tiny_clipboard_table = &clipboard_table;
+
+void
+platform_clipboard_get(char **buf, size_t *len)
+{
+	clipboard_get(buf, len);
+}
+
+void
+platform_clipboard_set(const char *buf, size_t len)
+{
+	clipboard_set(buf, len, NULL, 0);
+}

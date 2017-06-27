@@ -1156,6 +1156,26 @@ mousefocus(struct gui_window *g, bool click)
 	}
 }
 
+static void
+contextmenu(struct gui_window *g)
+{
+	struct browser_window_features features;
+	const char *link;
+	const struct rect *r;
+	int x, y;
+
+	// TODO: Implement context menu. For now, just copy link.
+
+	r = &g->ui[UI_CONTENT].r;
+	x = g->ptr.x - (r->x0 - g->scroll.x);
+	y = g->ptr.y - (r->y0 - g->scroll.y);
+	browser_window_get_features(g->bw, x, y, &features);
+	if (features.link) {
+		link = nsurl_access(features.link);
+		platform_clipboard_set(link, strlen(link));
+	}
+}
+
 void
 gui_window_button(struct gui_window *g, uint32_t time, int button, bool pressed)
 {
@@ -1208,8 +1228,8 @@ gui_window_button(struct gui_window *g, uint32_t time, int button, bool pressed)
 			mousedispatch(g, g->ptr.state);
 			break;
 		case 3:
-			// TODO: Implement context menu.
-			return;
+			contextmenu(g);
+			break;
 		default:
 			return;
 		}
