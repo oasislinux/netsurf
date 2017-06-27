@@ -25,8 +25,10 @@ struct rect;
 
 nserror platform_init(void);
 void platform_run(void);
+void platform_quit(void);
 
 struct platform_window *platform_window_create(struct gui_window *g);
+void platform_window_destroy(struct platform_window *p);
 void platform_window_update(struct platform_window *p, const struct rect *r);
 browser_mouse_state platform_window_get_mods(struct platform_window *p);
 void platform_window_set_title(struct platform_window *p, const char *title);

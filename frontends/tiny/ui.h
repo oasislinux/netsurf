@@ -22,6 +22,8 @@
 struct rect;
 struct redraw_context;
 
+void gui_window_destroy(struct gui_window *g);
+
 void gui_window_reformat(struct gui_window *g, int w, int h);
 void gui_window_redraw(struct gui_window *g, const struct rect *clip, const struct redraw_context *ctx);
 

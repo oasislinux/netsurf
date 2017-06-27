@@ -96,6 +96,10 @@ struct elementimpl {
 	void (*key)(struct gui_window *g, struct element *e, uint32_t key);
 };
 
+struct link {
+	struct link *next, *prev;
+};
+
 struct gui_window {
 	struct platform_window *platform;
 
@@ -139,7 +143,11 @@ struct gui_window {
 	struct {
 		int w, h;
 	} extent;
+
+	struct link link;
 };
+
+static struct link windows = {&windows, &windows};
 
 static int
 rectwidth(const struct rect *r) {
@@ -760,6 +768,11 @@ window_create(struct browser_window *bw, struct gui_window *existing, gui_window
 	g->ptr.focus = UI_CONTENT;
 	g->kbd.focus = UI_CONTENT;
 
+	g->link.prev = windows.prev;
+	g->link.next = &windows;
+	g->link.prev->next = &g->link;
+	g->link.next->prev = &g->link;
+
 	return g;
 
 err5:
@@ -779,7 +792,19 @@ err0:
 static void
 window_destroy(struct gui_window *g)
 {
-	LOG("destroy\n");
+	platform_window_destroy(g->platform);
+	textarea_destroy(g->url);
+	textarea_destroy(g->search.box);
+	free(g->search.text);
+	scrollbar_destroy(g->scroll.h);
+	scrollbar_destroy(g->scroll.v);
+
+	g->link.next->prev = g->link.prev;
+	g->link.prev->next = g->link.next;
+	free(g);
+
+	if (windows.next == &windows)
+		platform_quit();
 }
 
 static nserror
@@ -987,6 +1012,12 @@ static struct gui_window_table window_table = {
 struct gui_window_table *tiny_window_table = &window_table;
 
 /**** gui_window internal interface ****/
+void
+gui_window_destroy(struct gui_window *g)
+{
+	browser_window_destroy(g->bw);
+}
+
 void
 gui_window_reformat(struct gui_window *g, int w, int h)
 {

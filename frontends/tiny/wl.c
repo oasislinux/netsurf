@@ -284,8 +284,12 @@ keyboard_enter(void *data, struct wl_keyboard *keyboard, uint32_t serial, struct
 static void
 keyboard_leave(void *data, struct wl_keyboard *keyboard, uint32_t serial, struct wl_surface *surface)
 {
-	struct platform_window *p = wl_surface_get_user_data(surface);
+	struct platform_window *p;
 
+	if (!surface)
+		return;
+
+	p = wl_surface_get_user_data(surface);
 	wl->repeat.sym = XKB_KEY_NoSymbol;
 	if (wl->kbdfocus == p)
 		wl->kbdfocus = NULL;
@@ -736,7 +740,9 @@ xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, int32_t width
 static void
 xdg_surface_close(void *data, struct xdg_surface *xdg_surface)
 {
-	running = false;
+	struct platform_window *p = data;
+
+	gui_window_destroy(p->g);
 }
 
 static struct xdg_surface_listener xdg_surface_listener = {
@@ -882,6 +888,12 @@ platform_run(void)
 	}
 }
 
+void
+platform_quit(void)
+{
+	running = false;
+}
+
 /**** platform window ****/
 struct platform_window *
 platform_window_create(struct gui_window *g)
@@ -918,7 +930,21 @@ platform_window_create(struct gui_window *g)
 void
 platform_window_destroy(struct platform_window *p)
 {
-	// TODO: implement
+	if (p->frame)
+		wl_callback_destroy(p->frame);
+	xdg_surface_destroy(p->xdg_surface);
+	wl_surface_destroy(p->surface);
+	destroyimage(p->image);
+	pixman_region32_fini(&p->damage);
+	free(p);
+
+	tiny_schedule(-1, redraw, p);
+	tiny_schedule(-1, resize, p);
+	tiny_schedule(-1, keyrepeat, p);
+	if (wl->kbdfocus == p)
+		wl->kbdfocus = NULL;
+	if (wl->ptrfocus == p)
+		wl->ptrfocus = NULL;
 }
 
 void
