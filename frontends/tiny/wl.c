@@ -129,7 +129,6 @@ struct platform_window {
 	struct gui_window *g;  // TODO: should this be here?
 
 	struct wl_callback *frame;
-	bool framepending;
 
 	struct wl_surface *surface;
 	struct wlimage *image;
@@ -238,7 +237,8 @@ frame_done(void *data, struct wl_callback *cb, uint32_t time)
 {
 	struct platform_window *p = data;
 
-	p->framepending = false;
+	wl_callback_destroy(p->frame);
+	p->frame = NULL;
 	if (pixman_region32_not_empty(&p->damage))
 		redraw(p);
 }
@@ -615,7 +615,7 @@ redraw(void *data)
 	pixman_box32_t *b;
 	int n;
 
-	if (p->framepending)
+	if (p->frame)
 		return;
 
 	pixman_region32_intersect_rect(&p->damage, &p->damage, 0, 0, p->width, p->height);
@@ -633,10 +633,8 @@ redraw(void *data)
 	gui_window_redraw(p->g, &clip, &ctx);
 
 	p->frame = wl_surface_frame(p->surface);
-	if (p->frame) {
-		p->framepending = true;
+	if (p->frame)
 		wl_callback_add_listener(p->frame, &frame_listener, p);
-	}
 	wl_surface_commit(p->surface);
 	pixman_region32_clear(&p->damage);
 }
@@ -897,7 +895,7 @@ platform_window_create(struct gui_window *g)
 	p->nextwidth = 800;
 	p->nextheight = 600;
 	p->image = NULL;
-	p->framepending = false;
+	p->frame = NULL;
 	p->surface = wl_compositor_create_surface(wl->compositor);
 	if (!p->surface)
 		return NULL;
