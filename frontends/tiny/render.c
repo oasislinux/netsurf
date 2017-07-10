@@ -839,10 +839,10 @@ plot_path(const struct redraw_context *ctx, const plot_style_t *style, const flo
 		transform[0] * 65536, transform[1] * 65536,
 		transform[2] * 65536, transform[3] * 65536,
 	};
-	FT_Vector t = {transform[4] * 64, -transform[5] * 64};
+	FT_Vector t = {transform[4] * 64, -transform[5] * 64}, pos, points[3];
 	FT_UInt ncontours, npoints;
 	nserror err = NSERROR_OK;
-	int i, start;
+	int i, start, moved;
 
 	/* fill */
 	if (style->fill_colour != NS_TRANSPARENT) {
@@ -931,27 +931,36 @@ plot_path(const struct redraw_context *ctx, const plot_style_t *style, const flo
 				break;
 			}
 		}
+#define NE(p, q) ((p).x != (q).x || (p).y != (q).y)
 		for (i = 0; i < n; ++i) {
 			switch ((int)p[i]) {
 			case PLOTTER_PATH_MOVE:
-				if (i)
+				if (i && moved)
 					FT_Stroker_EndSubPath(stroker);
-				FT_Stroker_BeginSubPath(stroker, &(FT_Vector){p[i+1] * 64, -p[i+2] * 64}, outline.tags[i]);
+				pos = (FT_Vector){p[i+1] * 64, -p[i+2] * 64};
+				FT_Stroker_BeginSubPath(stroker, &pos, outline.tags[i]);
 				i += 2;
+				moved = 0;
 				break;
 			case PLOTTER_PATH_LINE:
-				FT_Stroker_LineTo(stroker, &(FT_Vector){p[i+1] * 64, -p[i+2] * 64});
+				points[0] = (FT_Vector){p[i+1] * 64, -p[i+2] * 64};
+				if (!moved && NE(pos, points[0]))
+					moved = 1;
+				FT_Stroker_LineTo(stroker, &points[0]);
 				i += 2;
 				break;
 			case PLOTTER_PATH_BEZIER:
-				FT_Stroker_CubicTo(stroker,
-					&(FT_Vector){p[i+1] * 64, -p[i+2] * 64},
-					&(FT_Vector){p[i+3] * 64, -p[i+4] * 64},
-					&(FT_Vector){p[i+5] * 64, -p[i+6] * 64});
+				points[0] = (FT_Vector){p[i+1] * 64, -p[i+2] * 64};
+				points[1] = (FT_Vector){p[i+3] * 64, -p[i+4] * 64};
+				points[2] = (FT_Vector){p[i+5] * 64, -p[i+6] * 64};
+				if (!moved && (NE(pos, points[0]) || NE(pos, points[1]) || NE(pos, points[2])))
+					moved = 1;
+				FT_Stroker_CubicTo(stroker, &points[0], &points[1], &points[2]);
 				i += 6;
 				break;
 			}
 		}
+#undef NE
 		FT_Stroker_EndSubPath(stroker);
 		err = fterror(FT_Stroker_GetCounts(stroker, &npoints, &ncontours));
 		if (err != NSERROR_OK)
