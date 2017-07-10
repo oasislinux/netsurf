@@ -646,7 +646,10 @@ plot_clip(const struct redraw_context *ctx, const struct rect *clip)
 
 	if (clip) {
 		curclip = *clip;
-		box = (pixman_box32_t){clip->x0, clip->y0, clip->x1, clip->y1};
+		box = (pixman_box32_t){
+			min(clip->x0, clip->x1), min(clip->y0, clip->y1),
+			max(clip->x0, clip->x1), max(clip->y0, clip->y1),
+		};
 		pixman_region32_init_with_extents(&region, &box);
 		success = pixman_image_set_clip_region32(target, &region);
 	} else {
