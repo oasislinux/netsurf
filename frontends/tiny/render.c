@@ -16,6 +16,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <complex.h>
 #include <stdbool.h>
 #include <pixman.h>
 #include <math.h>
@@ -661,10 +662,82 @@ plot_clip(const struct redraw_context *ctx, const struct rect *clip)
 }
 
 static nserror
-plot_arc(const struct redraw_context *ctx, const plot_style_t *style, int x, int y, int radius, int angle1, int angle2)
+plot_arc(const struct redraw_context *ctx, const plot_style_t *style, int x, int y, int r, int angle1, int angle2)
 {
-	LOG("plot_arc");
-	return NSERROR_NOT_IMPLEMENTED;
+	nserror err;
+	FT_Stroker stroker = NULL;
+	FT_Outline outline;
+	FT_UInt ncontours, npoints;
+	double complex z, p1, p2, c1, c2, k[3], rot;
+	double theta;
+	int n;
+
+	if (angle2 <= angle1 || r <= 0)
+		return NSERROR_OK;
+	if (angle2 - angle1 >= 360)
+		angle2 = angle1 + 360;
+
+	err = fterror(FT_Stroker_New(library, &stroker));
+	if (err)
+		goto err;
+	FT_Stroker_Set(stroker, 32, FT_STROKER_LINECAP_BUTT, FT_STROKER_LINEJOIN_BEVEL, 0);
+
+	x <<= 6;
+	y <<= 6;
+	r <<= 6;
+
+	/* number of arc segments */
+	n = (angle2 - angle1 + 89) / 90;
+	/* arc segment angle */
+	theta = (angle2 - angle1) * M_PI / (180 * n);
+	/* rotation to the next arc segment */
+	rot = cexp(I * theta);
+	/* end points of arc segment, relative to bisector */
+	p2 = cexp(I * theta / 2);
+	p1 = CMPLX(creal(p2), -cimag(p2));
+	/* control points of arc segment, relative to bisector */
+	c2 = CMPLX((4 - creal(p2)) / 3, (1 - creal(p2)) * (3 - creal(p2)) / (3 * cimag(p2)));
+	c1 = CMPLX(creal(c2), -cimag(c2));
+	/* bisector of the arc segment */
+	z = r * cexp(I * (angle1 * M_PI / 180 + theta / 2));
+
+#define VEC(z) &(FT_Vector){creal(z), cimag(z)}
+	k[0] = p1 * z;
+	FT_Stroker_BeginSubPath(stroker, VEC(k[0]), 1);
+	for (; n > 0; --n) {
+		k[0] = c1 * z;
+		k[1] = c2 * z;
+		k[2] = p2 * z;
+		FT_Stroker_CubicTo(stroker, VEC(k[0]), VEC(k[1]), VEC(k[2]));
+		z *= rot;
+	}
+#undef VEC
+	FT_Stroker_EndSubPath(stroker);
+	err = fterror(FT_Stroker_GetCounts(stroker, &npoints, &ncontours));
+	if (err != NSERROR_OK)
+		goto err;
+
+	outline.points = reallocarray(NULL, sizeof(outline.points[0]), npoints);
+	outline.tags = reallocarray(NULL, sizeof(outline.tags[0]), npoints);
+	outline.contours = reallocarray(NULL, sizeof(outline.contours[0]), ncontours);
+	outline.flags = FT_OUTLINE_OWNER;
+	if (!outline.contours || !outline.tags || !outline.contours) {
+		err = NSERROR_NOMEM;
+		goto err;
+	}
+	outline.n_contours = 0;
+	outline.n_points = 0;
+	FT_Stroker_Export(stroker, &outline);
+	FT_Outline_Translate(&outline, x, -y);
+
+	err = plotoutline(&outline, style->fill_colour);
+err:
+	FT_Stroker_Done(stroker);
+	free(outline.points);
+	free(outline.tags);
+	free(outline.contours);
+
+	return err;
 }
 
 static nserror
@@ -675,7 +748,7 @@ plot_disc(const struct redraw_context *ctx, const plot_style_t *style, int x, in
 	r <<= 6;
 
 	FT_Outline outline;
-	FT_Pos c = (double)r * 4 * (sqrt(2) - 1) / 3;
+	FT_Pos c = (double)r * 4 * (M_SQRT2 - 1) / 3;
 	FT_Vector points[] = {
 		{x - r, -y},
 		{x - r, -(y - c)},
