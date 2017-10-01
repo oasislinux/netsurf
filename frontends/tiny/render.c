@@ -572,10 +572,23 @@ bitmap_render(struct bitmap *bitmap, struct hlcache_handle *content)
 		.background_images = true,
 		.plot = tiny_plotter_table,
 	};
+	int dw, dh, cw, ch;
+	pixman_transform_t transform;
 
-	target = image;
-	content_scaled_redraw(content, pixman_image_get_width(image), pixman_image_get_height(image), &ctx);
-	//printf("bitmap_render\n");
+	dw = pixman_image_get_width(image);
+	dh = pixman_image_get_height(image);
+	cw = min(max(content_get_width(content), dw), 1024);
+	ch = (cw * dh + dw / 2) / dw;
+
+	target = pixman_image_create_bits_no_clear(pixman_image_get_format(image), cw, ch, NULL, 0);
+	if (!target)
+		return NSERROR_NOMEM;
+	content_scaled_redraw(content, pixman_image_get_width(target), pixman_image_get_height(target), &ctx);
+	pixman_transform_init_scale(&transform, pixman_int_to_fixed(cw) / dw, pixman_int_to_fixed(ch) / dh);
+	pixman_image_set_transform(image, &transform);
+	pixman_image_set_filter(image, PIXMAN_FILTER_GOOD, NULL, 0);
+	pixman_image_composite32(PIXMAN_OP_SRC, image, NULL, target, 0, 0, 0, 0, 0, 0, dw, dh);
+
 	return NSERROR_OK;
 }
 
