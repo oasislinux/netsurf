@@ -920,6 +920,10 @@ plot_path(const struct redraw_context *ctx, const plot_style_t *style, const flo
 	nserror err = NSERROR_OK;
 	int i, start, moved;
 
+	/* freetype only supports up to 2^16-1 points */
+	if (n > 0xffff)
+		return NSERROR_OK;
+
 	/* fill */
 	if (style->fill_colour != NS_TRANSPARENT) {
 		outline.points = reallocarray(NULL, sizeof(outline.points[0]), n);
