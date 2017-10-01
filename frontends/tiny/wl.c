@@ -810,7 +810,7 @@ platform_init(void)
 	wl_display_roundtrip(wl->display);
 
 	if (!wl->compositor || !wl->seat || !wl->shm || !wl->shell) {
-		LOG("display is missing required globals");
+		NSLOG(netsurf, ERROR, "display is missing required globals");
 		err = NSERROR_INIT_FAILED;
 		goto err5;
 	}

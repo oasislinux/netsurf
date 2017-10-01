@@ -145,6 +145,7 @@ nsgtk_cw_button_release_event(GtkWidget *widget,
 {
 	struct nsgtk_corewindow *nsgtk_cw = (struct nsgtk_corewindow *)g;
 	struct nsgtk_corewindow_mouse *mouse = &nsgtk_cw->mouse_state;
+	bool was_drag = false;
 
 	/* only button 1 clicks are considered double clicks. If the
 	 * mouse state is PRESS then we are waiting for a release to
@@ -168,9 +169,11 @@ nsgtk_cw_button_release_event(GtkWidget *widget,
 	} else if (mouse->state & BROWSER_MOUSE_HOLDING_1) {
 		mouse->state ^= (BROWSER_MOUSE_HOLDING_1 |
 				 BROWSER_MOUSE_DRAG_ON);
+		was_drag = true;
 	} else if (mouse->state & BROWSER_MOUSE_HOLDING_2) {
 		mouse->state ^= (BROWSER_MOUSE_HOLDING_2 |
 				 BROWSER_MOUSE_DRAG_ON);
+		was_drag = true;
 	}
 
 	/* Handle modifiers being removed */
@@ -188,9 +191,10 @@ nsgtk_cw_button_release_event(GtkWidget *widget,
 	}
 
 	/* end drag with modifiers */
-	if (mouse->state & (BROWSER_MOUSE_MOD_1 |
-			    BROWSER_MOUSE_MOD_2 |
-			    BROWSER_MOUSE_MOD_3)) {
+	if (was_drag && (mouse->state & (
+			BROWSER_MOUSE_MOD_1 |
+			BROWSER_MOUSE_MOD_2 |
+			BROWSER_MOUSE_MOD_3))) {
 		mouse->state = BROWSER_MOUSE_HOVER;
 	}
 
@@ -413,14 +417,14 @@ nsgtk_cw_keypress_event(GtkWidget *widget, GdkEventKey *event, gpointer g)
 	if (res == NSERROR_OK) {
 		return TRUE;
 	} else if (res != NSERROR_NOT_IMPLEMENTED) {
-		LOG("%s", messages_get_errorcode(res));
+		NSLOG(netsurf, INFO, "%s", messages_get_errorcode(res));
 		return FALSE;
 	}
 
 	/* deal with unprocessed keypress */
 	res = nsgtk_cw_key(nsgtk_cw, nskey);
 	if (res != NSERROR_OK) {
-		LOG("%s", messages_get_errorcode(res));
+		NSLOG(netsurf, INFO, "%s", messages_get_errorcode(res));
 		return FALSE;
 	}
 	return TRUE;

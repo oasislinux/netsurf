@@ -861,8 +861,6 @@ window_update_extent(struct gui_window *g)
 	bool reformat = false;
 	int w, h;
 
-	LOG("content %d, %d\n", rectwidth(&g->ui[UI_CONTENT].r), rectheight(&g->ui[UI_CONTENT].r));
-
 	browser_window_get_extents(g->bw, false, &g->extent.w, &g->extent.h);
 	w = g->width;
 	h = g->height;
@@ -916,8 +914,6 @@ window_update_extent(struct gui_window *g)
 		e = &g->ui[UI_CONTENT];
 		browser_window_reformat(g->bw, false, rectwidth(&e->r), rectheight(&e->r));
 	}
-
-	LOG("update_extent %d, %d\n", g->extent.w, g->extent.h);
 }
 
 static void
@@ -1022,8 +1018,6 @@ void
 gui_window_reformat(struct gui_window *g, int w, int h)
 {
 	const struct rect *r;
-
-	LOG("reformat %d, %d\n", w, h);
 
 	g->width = w;
 	g->height = h;

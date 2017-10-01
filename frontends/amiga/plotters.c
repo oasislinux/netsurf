@@ -53,15 +53,6 @@
 #include "amiga/rtg.h"
 #include "amiga/utf8.h"
 
-/* set AMI_PLOTTER_DEBUG to 0 for no debugging, 1 for debugging */
-//#define AMI_PLOTTER_DEBUG 1
-
-#ifdef AMI_PLOTTER_DEBUG
-#define PLOT_LOG(x...) LOG(x)
-#else
-#define PLOT_LOG(x...) ((void) 0)
-#endif
-
 HOOKF(void, ami_bitmap_tile_hook, struct RastPort *, rp, struct BackFillMessage *);
 
 struct bfbitmap {
@@ -119,9 +110,6 @@ static bool palette_mapped = true; /* palette-mapped state for the screen */
   */
 #define AREA_SIZE 25000
 
-/* Define the below to get additional debug */
-#undef AMI_PLOTTER_DEBUG
-
 struct gui_globals *ami_plot_ra_alloc(ULONG width, ULONG height, bool force32bit, bool alloc_pen_list)
 {
 	/* init shared bitmaps */
@@ -131,7 +119,7 @@ struct gui_globals *ami_plot_ra_alloc(ULONG width, ULONG height, bool force32bit
 	struct gui_globals *gg = malloc(sizeof(struct gui_globals));
 
 	if(force32bit == false) depth = GetBitMapAttr(scrn->RastPort.BitMap, BMA_DEPTH);
-	LOG("Screen depth = %d", depth);
+	NSLOG(netsurf, INFO, "Screen depth = %d", depth);
 
 #ifdef __amigaos4__
 	if(depth < 16) {
@@ -241,7 +229,8 @@ struct gui_globals *ami_plot_ra_alloc(ULONG width, ULONG height, bool force32bit
 	gg->open_num = -1;
 
 	init_layers_count++;
-	LOG("Layer initialised (total: %d)", init_layers_count);
+	NSLOG(netsurf, INFO, "Layer initialised (total: %d)",
+	      init_layers_count);
 
 	return gg;
 }
@@ -328,7 +317,8 @@ static ULONG ami_plot_obtain_pen(struct MinList *shared_pens, ULONG colr)
 			(colr & 0x00ff0000) << 8,
 			NULL);
 	
-	if(pen == -1) LOG("WARNING: Cannot allocate pen for ABGR:%lx", colr);
+	if(pen == -1) NSLOG(netsurf, INFO,
+			    "WARNING: Cannot allocate pen for ABGR:%lx", colr);
 
 	if((shared_pens != NULL) && (pool_pens != NULL)) {
 		if((node = (struct ami_plot_pen *)ami_memory_itempool_alloc(pool_pens, sizeof(struct ami_plot_pen)))) {
@@ -436,7 +426,7 @@ static void ami_arc_gfxlib(struct RastPort *rp, int x, int y, int radius, int an
 static nserror
 ami_bitmap(struct gui_globals *glob, int x, int y, int width, int height, struct bitmap *bitmap)
 {
-	PLOT_LOG("[ami_plotter] Entered ami_bitmap()");
+	NSLOG(plot, DEEPDEBUG, "[ami_plotter] Entered ami_bitmap()");
 
 	struct BitMap *tbm;
 
@@ -456,7 +446,7 @@ ami_bitmap(struct gui_globals *glob, int x, int y, int width, int height, struct
 		return NSERROR_OK;
 	}
 
-	PLOT_LOG("[ami_plotter] ami_bitmap() got native bitmap");
+	NSLOG(plot, DEEPDEBUG, "[ami_plotter] ami_bitmap() got native bitmap");
 
 #ifdef __amigaos4__
 	if (__builtin_expect((GfxBase->LibNode.lib_Version >= 53) &&
@@ -615,7 +605,7 @@ ami_clip(const struct redraw_context *ctx, const struct rect *clip)
 	struct gui_globals *glob = (struct gui_globals *)ctx->priv;
 	struct Region *reg = NULL;
 
-	PLOT_LOG("[ami_plotter] Entered ami_clip()");
+	NSLOG(plot, DEEPDEBUG, "[ami_plotter] Entered ami_clip()");
 
 	if (glob->rp->Layer) {
 		reg = NewRegion();
@@ -659,7 +649,7 @@ ami_arc(const struct redraw_context *ctx,
 	const plot_style_t *style,
 	int x, int y, int radius, int angle1, int angle2)
 {
-	PLOT_LOG("[ami_plotter] Entered ami_arc()");
+	NSLOG(plot, DEEPDEBUG, "[ami_plotter] Entered ami_arc()");
 
 	struct gui_globals *glob = (struct gui_globals *)ctx->priv;
 
@@ -691,7 +681,7 @@ ami_disc(const struct redraw_context *ctx,
 		const plot_style_t *style,
 		int x, int y, int radius)
 {
-	PLOT_LOG("[ami_plotter] Entered ami_disc()");
+	NSLOG(plot, DEEPDEBUG, "[ami_plotter] Entered ami_disc()");
 
 	struct gui_globals *glob = (struct gui_globals *)ctx->priv;
 
@@ -726,7 +716,7 @@ ami_line(const struct redraw_context *ctx,
 		const plot_style_t *style,
 		const struct rect *line)
 {
-	PLOT_LOG("[ami_plotter] Entered ami_line()");
+	NSLOG(plot, DEEPDEBUG, "[ami_plotter] Entered ami_line()");
 
 	struct gui_globals *glob = (struct gui_globals *)ctx->priv;
 
@@ -778,7 +768,7 @@ ami_rectangle(const struct redraw_context *ctx,
 		     const plot_style_t *style,
 		     const struct rect *rect)
 {
-	PLOT_LOG("[ami_plotter] Entered ami_rectangle()");
+	NSLOG(plot, DEEPDEBUG, "[ami_plotter] Entered ami_rectangle()");
 
 	struct gui_globals *glob = (struct gui_globals *)ctx->priv;
 
@@ -842,24 +832,24 @@ ami_polygon(const struct redraw_context *ctx,
 		   const int *p,
 		   unsigned int n)
 {
-	PLOT_LOG("[ami_plotter] Entered ami_polygon()");
+	NSLOG(plot, DEEPDEBUG, "[ami_plotter] Entered ami_polygon()");
 
 	struct gui_globals *glob = (struct gui_globals *)ctx->priv;
 
 	ami_plot_setapen(glob, glob->rp, style->fill_colour);
 
 	if (AreaMove(glob->rp,p[0],p[1]) == -1) {
-		LOG("AreaMove: vector list full");
+		NSLOG(netsurf, INFO, "AreaMove: vector list full");
 	}
 
 	for (uint32 k = 1; k < n; k++) {
 		if (AreaDraw(glob->rp,p[k*2],p[(k*2)+1]) == -1) {
-			LOG("AreaDraw: vector list full");
+			NSLOG(netsurf, INFO, "AreaDraw: vector list full");
 		}
 	}
 
 	if (AreaEnd(glob->rp) == -1) {
-		LOG("AreaEnd: error");
+		NSLOG(netsurf, INFO, "AreaEnd: error");
 	}
 
 	return NSERROR_OK;
@@ -891,7 +881,7 @@ ami_path(const struct redraw_context *ctx,
 	unsigned int i;
 	struct bez_point start_p = {0, 0}, cur_p = {0, 0}, p_a, p_b, p_c, p_r;
 
-	PLOT_LOG("[ami_plotter] Entered ami_path()");
+	NSLOG(plot, DEEPDEBUG, "[ami_plotter] Entered ami_path()");
 
 	struct gui_globals *glob = (struct gui_globals *)ctx->priv;
 
@@ -900,7 +890,7 @@ ami_path(const struct redraw_context *ctx,
 	}
 
 	if (p[0] != PLOTTER_PATH_MOVE) {
-		LOG("Path does not start with move");
+		NSLOG(netsurf, INFO, "Path does not start with move");
 		return NSERROR_INVALID;
 	}
 
@@ -922,7 +912,8 @@ ami_path(const struct redraw_context *ctx,
 		if (p[i] == PLOTTER_PATH_MOVE) {
 			if (pstyle->fill_colour != NS_TRANSPARENT) {
 				if (AreaMove(glob->rp, p[i+1], p[i+2]) == -1) {
-					LOG("AreaMove: vector list full");
+					NSLOG(netsurf, INFO,
+					      "AreaMove: vector list full");
 				}
 			} else {
 				Move(glob->rp, p[i+1], p[i+2]);
@@ -936,7 +927,7 @@ ami_path(const struct redraw_context *ctx,
 		} else if (p[i] == PLOTTER_PATH_CLOSE) {
 			if (pstyle->fill_colour != NS_TRANSPARENT) {
 				if (AreaEnd(glob->rp) == -1) {
-					LOG("AreaEnd: error");
+					NSLOG(netsurf, INFO, "AreaEnd: error");
 				}
 			} else {
 				Draw(glob->rp, start_p.x, start_p.y);
@@ -945,7 +936,8 @@ ami_path(const struct redraw_context *ctx,
 		} else if (p[i] == PLOTTER_PATH_LINE) {
 			if (pstyle->fill_colour != NS_TRANSPARENT) {
 				if (AreaDraw(glob->rp, p[i+1], p[i+2]) == -1) {
-					LOG("AreaDraw: vector list full");
+					NSLOG(netsurf, INFO,
+					      "AreaDraw: vector list full");
 				}
 			} else {
 				Draw(glob->rp, p[i+1], p[i+2]);
@@ -965,7 +957,8 @@ ami_path(const struct redraw_context *ctx,
 				ami_bezier(&cur_p, &p_a, &p_b, &p_c, t, &p_r);
 				if (pstyle->fill_colour != NS_TRANSPARENT) {
 					if (AreaDraw(glob->rp, p_r.x, p_r.y) == -1) {
-						LOG("AreaDraw: vector list full");
+						NSLOG(netsurf, INFO,
+						      "AreaDraw: vector list full");
 					}
 				} else {
 					Draw(glob->rp, p_r.x, p_r.y);
@@ -975,7 +968,7 @@ ami_path(const struct redraw_context *ctx,
 			cur_p.y = p_c.y;
 			i += 7;
 		} else {
-			LOG("bad path command %f", p[i]);
+			NSLOG(netsurf, INFO, "bad path command %f", p[i]);
 			/* End path for safety if using Area commands */
 			if (pstyle->fill_colour != NS_TRANSPARENT) {
 				AreaEnd(glob->rp);
@@ -1032,7 +1025,7 @@ ami_bitmap_tile(const struct redraw_context *ctx,
 	bool repeat_x = (flags & BITMAPF_REPEAT_X);
 	bool repeat_y = (flags & BITMAPF_REPEAT_Y);
 
-	PLOT_LOG("[ami_plotter] Entered ami_bitmap_tile()");
+	NSLOG(plot, DEEPDEBUG, "[ami_plotter] Entered ami_bitmap_tile()");
 
 	struct gui_globals *glob = (struct gui_globals *)ctx->priv;
 
@@ -1149,7 +1142,7 @@ ami_text(const struct redraw_context *ctx,
 		const char *text,
 		size_t length)
 {
-	PLOT_LOG("[ami_plotter] Entered ami_text()");
+	NSLOG(plot, DEEPDEBUG, "[ami_plotter] Entered ami_text()");
 
 	struct gui_globals *glob = (struct gui_globals *)ctx->priv;
 

@@ -41,16 +41,6 @@
 #include "windows/gui.h"
 #include "windows/plot.h"
 
-
-/* set NSWS_PLOT_DEBUG to 0 for no debugging, 1 for debugging */
-/* #define NSWS_PLOT_DEBUG  */
-
-#ifdef NSWS_PLOT_DEBUG
-#define PLOT_LOG(x...) LOG(x)
-#else
-#define PLOT_LOG(x...) ((void) 0)
-#endif
-
 HDC plot_hdc;
 
 /** currently set clipping rectangle */
@@ -84,7 +74,7 @@ plot_block(COLORREF col, int x, int y, int width, int height)
 
 	/* ensure the plot HDC is set */
 	if (plot_hdc == NULL) {
-		LOG("HDC not set on call to plotters");
+		NSLOG(netsurf, INFO, "HDC not set on call to plotters");
 		return NSERROR_INVALID;
 	}
 
@@ -159,9 +149,9 @@ plot_alpha_bitmap(HDC hdc,
 	BITMAPINFO *bmi;
 	HBITMAP MemBMh;
 
-	PLOT_LOG("%p bitmap %d,%d width %d height %d",
+	NSLOG(plot, DEEPDEBUG, "%p bitmap %d,%d width %d height %d",
 		 bitmap, x, y, width, height);
-	PLOT_LOG("clipped %ld,%ld to %ld,%ld",
+	NSLOG(plot, DEEPDEBUG, "clipped %ld,%ld to %ld,%ld",
 		 plot_clip.left, plot_clip.top,
 		 plot_clip.right, plot_clip.bottom);
 
@@ -172,7 +162,7 @@ plot_alpha_bitmap(HDC hdc,
 
 	if ((bitmap->width != width) ||
 	    (bitmap->height != height)) {
-		PLOT_LOG("scaling from %d,%d to %d,%d",
+		NSLOG(plot, DEEPDEBUG, "scaling from %d,%d to %d,%d",
 			 bitmap->width, bitmap->height, width, height);
 		bitmap = bitmap_scale(bitmap, width, height);
 		if (bitmap == NULL) {
@@ -299,7 +289,7 @@ plot_bitmap(struct bitmap *bitmap, int x, int y, int width, int height)
 
 	/* ensure the plot HDC is set */
 	if (plot_hdc == NULL) {
-		LOG("HDC not set on call to plotters");
+		NSLOG(netsurf, INFO, "HDC not set on call to plotters");
 		return NSERROR_INVALID;
 	}
 
@@ -344,7 +334,7 @@ plot_bitmap(struct bitmap *bitmap, int x, int y, int width, int height)
 		if (bltres == 0) {
 			res = NSERROR_INVALID;
 		}
-		PLOT_LOG("bltres = %d", bltres);
+		NSLOG(plot, DEEPDEBUG, "bltres = %d", bltres);
 	} else {
 		/* Bitmap with alpha.*/
 		res = plot_alpha_bitmap(plot_hdc, bitmap, x, y, width, height);
@@ -366,7 +356,7 @@ plot_bitmap(struct bitmap *bitmap, int x, int y, int width, int height)
  */
 static nserror clip(const struct redraw_context *ctx, const struct rect *clip)
 {
-	PLOT_LOG("clip %d,%d to %d,%d", clip->x0, clip->y0, clip->x1, clip->y1);
+	NSLOG(plot, DEEPDEBUG, "clip %d,%d to %d,%d", clip->x0, clip->y0, clip->x1, clip->y1);
 
 	plot_clip.left = clip->x0;
 	plot_clip.top = clip->y0;
@@ -399,12 +389,12 @@ arc(const struct redraw_context *ctx,
     int x, int y,
     int radius, int angle1, int angle2)
 {
-	PLOT_LOG("arc centre %d,%d radius %d from %d to %d", x, y, radius,
+	NSLOG(plot, DEEPDEBUG, "arc centre %d,%d radius %d from %d to %d", x, y, radius,
 		 angle1, angle2);
 
 	/* ensure the plot HDC is set */
 	if (plot_hdc == NULL) {
-		LOG("HDC not set on call to plotters");
+		NSLOG(netsurf, INFO, "HDC not set on call to plotters");
 		return NSERROR_INVALID;
 	}
 
@@ -511,11 +501,11 @@ disc(const struct redraw_context *ctx,
      const plot_style_t *style,
      int x, int y, int radius)
 {
-	PLOT_LOG("disc at %d,%d radius %d", x, y, radius);
+	NSLOG(plot, DEEPDEBUG, "disc at %d,%d radius %d", x, y, radius);
 
 	/* ensure the plot HDC is set */
 	if (plot_hdc == NULL) {
-		LOG("HDC not set on call to plotters");
+		NSLOG(netsurf, INFO, "HDC not set on call to plotters");
 		return NSERROR_INVALID;
 	}
 
@@ -590,11 +580,12 @@ line(const struct redraw_context *ctx,
      const plot_style_t *style,
      const struct rect *line)
 {
-	PLOT_LOG("from %d,%d to %d,%d", x0, y0, x1, y1);
+	NSLOG(plot, DEEPDEBUG, "from %d,%d to %d,%d",
+	      line->x0, line->y0, line->x1, line->y1);
 
 	/* ensure the plot HDC is set */
 	if (plot_hdc == NULL) {
-		LOG("HDC not set on call to plotters");
+		NSLOG(netsurf, INFO, "HDC not set on call to plotters");
 		return NSERROR_INVALID;
 	}
 
@@ -656,12 +647,12 @@ rectangle(const struct redraw_context *ctx,
 	  const plot_style_t *style,
 	  const struct rect *rect)
 {
-	PLOT_LOG("rectangle from %d,%d to %d,%d",
+	NSLOG(plot, DEEPDEBUG, "rectangle from %d,%d to %d,%d",
 		 rect->x0, rect->y0, rect->x1, rect->y1);
 
 	/* ensure the plot HDC is set */
 	if (plot_hdc == NULL) {
-		LOG("HDC not set on call to plotters");
+		NSLOG(netsurf, INFO, "HDC not set on call to plotters");
 		return NSERROR_INVALID;
 	}
 
@@ -740,11 +731,11 @@ polygon(const struct redraw_context *ctx,
 	const int *p,
 	unsigned int n)
 {
-	PLOT_LOG("polygon %d points", n);
+	NSLOG(plot, DEEPDEBUG, "polygon %d points", n);
 
 	/* ensure the plot HDC is set */
 	if (plot_hdc == NULL) {
-		LOG("HDC not set on call to plotters");
+		NSLOG(netsurf, INFO, "HDC not set on call to plotters");
 		return NSERROR_INVALID;
 	}
 
@@ -788,7 +779,7 @@ polygon(const struct redraw_context *ctx,
 		points[i].x = (long) p[2 * i];
 		points[i].y = (long) p[2 * i + 1];
 
-		PLOT_LOG("%ld,%ld ", points[i].x, points[i].y);
+		NSLOG(plot, DEEPDEBUG, "%ld,%ld ", points[i].x, points[i].y);
 	}
 
 	SelectClipRgn(plot_hdc, clipregion);
@@ -831,7 +822,7 @@ path(const struct redraw_context *ctx,
      float width,
      const float transform[6])
 {
-	PLOT_LOG("path unimplemented");
+	NSLOG(plot, DEEPDEBUG, "path unimplemented");
 	return NSERROR_OK;
 }
 
@@ -875,10 +866,10 @@ bitmap(const struct redraw_context *ctx,
 
 	/* Bail early if we can */
 
-	PLOT_LOG("Plotting %p at %d,%d by %d,%d",bitmap, x,y,width,height);
+	NSLOG(plot, DEEPDEBUG, "Plotting %p at %d,%d by %d,%d",bitmap, x,y,width,height);
 
 	if (bitmap == NULL) {
-		LOG("Passed null bitmap!");
+		NSLOG(netsurf, INFO, "Passed null bitmap!");
 		return NSERROR_OK;
 	}
 
@@ -937,8 +928,8 @@ bitmap(const struct redraw_context *ctx,
 		}
 	}
 
-	PLOT_LOG("Tiled plotting %d,%d by %d,%d", x, y, width, height);
-	PLOT_LOG("clipped %ld,%ld to %ld,%ld",
+	NSLOG(plot, DEEPDEBUG, "Tiled plotting %d,%d by %d,%d", x, y, width, height);
+	NSLOG(plot, DEEPDEBUG, "clipped %ld,%ld to %ld,%ld",
 		 plot_clip.left, plot_clip.top,
 		 plot_clip.right, plot_clip.bottom);
 
@@ -952,7 +943,7 @@ bitmap(const struct redraw_context *ctx,
 		for (; y > plot_clip.top; y -= height);
 	}
 
-	PLOT_LOG("repeat from %d,%d to %ld,%ld",
+	NSLOG(plot, DEEPDEBUG, "repeat from %d,%d to %ld,%ld",
 		 x, y, plot_clip.right, plot_clip.bottom);
 
 	/* tile down and across to extents */
@@ -989,11 +980,11 @@ text(const struct redraw_context *ctx,
      const char *text,
      size_t length)
 {
-	PLOT_LOG("words %s at %d,%d", text, x, y);
+	NSLOG(plot, DEEPDEBUG, "words %s at %d,%d", text, x, y);
 
 	/* ensure the plot HDC is set */
 	if (plot_hdc == NULL) {
-		LOG("HDC not set on call to plotters");
+		NSLOG(netsurf, INFO, "HDC not set on call to plotters");
 		return NSERROR_INVALID;
 	}
 

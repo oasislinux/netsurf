@@ -536,7 +536,9 @@ static nserror global_history_initialise_entry_fields(void)
 		goto error;
 	}
 
-	gh_ctx.fields[GH_URL].flags = TREE_FLAG_COPY_TEXT;
+	gh_ctx.fields[GH_URL].flags =
+			TREE_FLAG_COPY_TEXT |
+			TREE_FLAG_SEARCHABLE;
 	label = "TreeviewLabelURL";
 	label = messages_get(label);
 	if (lwc_intern_string(label, strlen(label),
@@ -596,7 +598,7 @@ static nserror global_history_initialise_time(void)
 	/* get the current time */
 	t = time(NULL);
 	if (t == -1) {
-		LOG("time info unaviable");
+		NSLOG(netsurf, INFO, "time info unaviable");
 		return NSERROR_UNKNOWN;
 	}
 
@@ -607,7 +609,7 @@ static nserror global_history_initialise_time(void)
 	full_time->tm_hour = 0;
 	t = mktime(full_time);
 	if (t == -1) {
-		LOG("mktime failed");
+		NSLOG(netsurf, INFO, "mktime failed");
 		return NSERROR_UNKNOWN;
 	}
 
@@ -729,7 +731,7 @@ nserror global_history_init(struct core_window_callback_table *cw_t,
 		return err;
 	}
 
-	LOG("Loading global history");
+	NSLOG(netsurf, INFO, "Loading global history");
 
 	/* Init. global history treeview time */
 	err = global_history_initialise_time();
@@ -752,7 +754,8 @@ nserror global_history_init(struct core_window_callback_table *cw_t,
 	err = treeview_create(&gh_ctx.tree, &gh_tree_cb_t,
 			N_FIELDS, gh_ctx.fields,
 			cw_t, core_window_handle,
-			TREEVIEW_NO_MOVES | TREEVIEW_DEL_EMPTY_DIRS);
+			TREEVIEW_NO_MOVES | TREEVIEW_DEL_EMPTY_DIRS |
+			TREEVIEW_SEARCHABLE);
 	if (err != NSERROR_OK) {
 		gh_ctx.tree = NULL;
 		return err;
@@ -785,7 +788,7 @@ nserror global_history_init(struct core_window_callback_table *cw_t,
 	/* Inform client of window height */
 	treeview_get_height(gh_ctx.tree);
 
-	LOG("Loaded global history");
+	NSLOG(netsurf, INFO, "Loaded global history");
 
 	return NSERROR_OK;
 }
@@ -797,7 +800,7 @@ nserror global_history_fini(void)
 	int i;
 	nserror err;
 
-	LOG("Finalising global history");
+	NSLOG(netsurf, INFO, "Finalising global history");
 
 	gh_ctx.built = false;
 
@@ -815,7 +818,7 @@ nserror global_history_fini(void)
 		return err;
 	}
 
-	LOG("Finalised global history");
+	NSLOG(netsurf, INFO, "Finalised global history");
 
 	return err;
 }
@@ -832,7 +835,8 @@ nserror global_history_add(nsurl *url)
 
 	data = urldb_get_url_data(url);
 	if (data == NULL) {
-		LOG("Can't add URL to history that's not present in urldb.");
+		NSLOG(netsurf, INFO,
+		      "Can't add URL to history that's not present in urldb.");
 		return NSERROR_BAD_PARAMETER;
 	}
 

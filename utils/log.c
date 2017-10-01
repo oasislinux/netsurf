@@ -1,9 +1,5 @@
 /*
- * Copyright 2007 Rob Kendrick <rjek@netsurf-browser.org>
- * Copyright 2004-2007 James Bursa <bursa@users.sourceforge.net>
- * Copyright 2003 Phil Mellor <monkeyson@users.sourceforge.net>
- * Copyright 2003 John M Bell <jmb202@ecs.soton.ac.uk>
- * Copyright 2004 John Tytgat <joty@netsurf-browser.org>
+ * Copyright 2017 Vincent Sanders <vince@netsurf-browser.org>
  *
  * This file is part of NetSurf, http://www.netsurf-browser.org/
  *
@@ -24,6 +20,7 @@
 #include <stdio.h>
 
 #include "utils/config.h"
+#include "utils/nsoption.h"
 #include "utils/sys_time.h"
 #include "utils/utsname.h"
 #include "desktop/version.h"
@@ -36,91 +33,13 @@ bool verbose_log = false;
 /** The stream to which logging is sent */
 static FILE *logfile;
 
-nserror nslog_init(nslog_ensure_t *ensure, int *pargc, char **argv)
-{
-	struct utsname utsname;
-	nserror ret = NSERROR_OK;
-
-	if (((*pargc) > 1) &&
-	    (argv[1][0] == '-') &&
-	    (argv[1][1] == 'v') &&
-	    (argv[1][2] == 0)) {
-		int argcmv;
-
-		/* verbose logging to stderr */
-		logfile = stderr;
-
-		/* remove -v from argv list */
-		for (argcmv = 2; argcmv < (*pargc); argcmv++) {
-			argv[argcmv - 1] = argv[argcmv];
-		}
-		(*pargc)--;
-
-		/* ensure we actually show logging */
-		verbose_log = true;
-	} else if (((*pargc) > 2) &&
-	    (argv[1][0] == '-') &&
-	    (argv[1][1] == 'V') &&
-	    (argv[1][2] == 0)) {
-		int argcmv;
-
-		/* verbose logging to file */
-		logfile = fopen(argv[2], "a+");
-
-		/* remove -V and filename from argv list */
-		for (argcmv = 3; argcmv < (*pargc); argcmv++) {
-			argv[argcmv - 2] = argv[argcmv];
-		}
-		(*pargc) -= 2;
-
-		if (logfile == NULL) {
-			/* could not open log file for output */
-			ret = NSERROR_NOT_FOUND;
-			verbose_log = false;
-		} else {
-
-			/* ensure we actually show logging */
-			verbose_log = true;
-		}
-	} else if (verbose_log == true) {
-		/* default is logging to stderr */
-		logfile = stderr;
-	}
-
-	/* ensure output file handle is correctly configured */
-	if ((verbose_log == true) &&
-	    (ensure != NULL) &&
-	    (ensure(logfile) == false)) {
-		/* failed to ensure output configuration */
-		ret = NSERROR_INIT_FAILED;
-		verbose_log = false;
-	}
-
-	/* sucessfull logging initialisation so log system info */
-	if (ret == NSERROR_OK) {
-		LOG("NetSurf version '%s'", netsurf_version);
-		if (uname(&utsname) < 0) {
-			LOG("Failed to extract machine information");
-		} else {
-			LOG("NetSurf on <%s>, node <%s>, release <%s>, version <%s>, machine <%s>",
-			    utsname.sysname,
-			    utsname.nodename,
-			    utsname.release,
-			    utsname.version,
-			    utsname.machine);
-		}
-	}
-
-	return ret;
-}
-
-#ifndef NDEBUG
-
-/* Subtract the `struct timeval' values X and Y,
-   storing the result in RESULT.
-   Return 1 if the difference is negative, otherwise 0.
-*/
-
+/** Subtract the `struct timeval' values X and Y
+ *
+ * \param result The timeval structure to store the result in
+ * \param x The first value
+ * \param y The second value
+ * \return 1 if the difference is negative, otherwise 0.
+ */
 static int
 timeval_subtract(struct timeval *result, struct timeval *x, struct timeval *y)
 {
@@ -166,24 +85,221 @@ static const char *nslog_gettime(void)
 	timeval_subtract(&tv, &now_tv, &start_tv);
 
 	snprintf(buff, sizeof(buff),"(%ld.%06ld)",
-			(long)tv.tv_sec, (long)tv.tv_usec);
+		 (long)tv.tv_sec, (long)tv.tv_usec);
 
 	return buff;
 }
 
-void nslog_log(const char *file, const char *func, int ln, const char *format, ...)
+#ifdef WITH_NSLOG
+
+NSLOG_DEFINE_CATEGORY(netsurf, "NetSurf default logging");
+NSLOG_DEFINE_CATEGORY(llcache, "Low level cache");
+NSLOG_DEFINE_CATEGORY(fetch, "objet fetching");
+NSLOG_DEFINE_CATEGORY(plot, "rendering system");
+NSLOG_DEFINE_CATEGORY(schedule, "scheduler");
+NSLOG_DEFINE_CATEGORY(fbtk, "Framebuffer toolkit");
+NSLOG_DEFINE_CATEGORY(layout, "Layout");
+
+static void
+netsurf_render_log(void *_ctx,
+		   nslog_entry_context_t *ctx,
+		   const char *fmt,
+		   va_list args)
 {
-	va_list ap;
+	fprintf(logfile,
+		"%s %.*s:%i %.*s: ",
+		nslog_gettime(),
+		ctx->filenamelen,
+		ctx->filename,
+		ctx->lineno,
+		ctx->funcnamelen,
+		ctx->funcname);
 
-	fprintf(logfile, "%s %s:%i %s: ", nslog_gettime(), file, ln, func);
+	vfprintf(logfile, fmt, args);
 
-	va_start(ap, format);
-
-	vfprintf(logfile, format, ap);
-
-	va_end(ap);
-
+	/* Log entries aren't newline terminated add one for clarity */
 	fputc('\n', logfile);
 }
 
+/* exported interface documented in utils/log.h */
+nserror
+nslog_set_filter(const char *filter)
+{
+	nslog_error err;
+	nslog_filter_t *filt = NULL;
+
+	err = nslog_filter_from_text(filter, &filt);
+	if (err != NSLOG_NO_ERROR) {
+		if (err == NSLOG_NO_MEMORY)
+			return NSERROR_NOMEM;
+		else
+			return NSERROR_INVALID;
+	}
+
+	err = nslog_filter_set_active(filt, NULL);
+	filt = nslog_filter_unref(filt);
+	if (err != NSLOG_NO_ERROR) {
+		return NSERROR_NOSPACE;
+	}
+
+	return NSERROR_OK;
+}
+
+#else
+
+void
+nslog_log(const char *file, const char *func, int ln, const char *format, ...)
+{
+	va_list ap;
+
+	if (verbose_log) {
+		fprintf(logfile,
+			"%s %s:%i %s: ",
+			nslog_gettime(),
+			file,
+			ln,
+			func);
+
+		va_start(ap, format);
+
+		vfprintf(logfile, format, ap);
+
+		va_end(ap);
+
+		fputc('\n', logfile);
+	}
+}
+
+/* exported interface documented in utils/log.h */
+nserror
+nslog_set_filter(const char *filter)
+{
+	(void)(filter);
+	return NSERROR_OK;
+}
+
+
 #endif
+
+nserror nslog_init(nslog_ensure_t *ensure, int *pargc, char **argv)
+{
+	struct utsname utsname;
+	nserror ret = NSERROR_OK;
+
+	if (((*pargc) > 1) &&
+	    (argv[1][0] == '-') &&
+	    (argv[1][1] == 'v') &&
+	    (argv[1][2] == 0)) {
+		int argcmv;
+
+		/* verbose logging to stderr */
+		logfile = stderr;
+
+		/* remove -v from argv list */
+		for (argcmv = 2; argcmv < (*pargc); argcmv++) {
+			argv[argcmv - 1] = argv[argcmv];
+		}
+		(*pargc)--;
+
+		/* ensure we actually show logging */
+		verbose_log = true;
+	} else if (((*pargc) > 2) &&
+		   (argv[1][0] == '-') &&
+		   (argv[1][1] == 'V') &&
+		   (argv[1][2] == 0)) {
+		int argcmv;
+
+		/* verbose logging to file */
+		logfile = fopen(argv[2], "a+");
+
+		/* remove -V and filename from argv list */
+		for (argcmv = 3; argcmv < (*pargc); argcmv++) {
+			argv[argcmv - 2] = argv[argcmv];
+		}
+		(*pargc) -= 2;
+
+		if (logfile == NULL) {
+			/* could not open log file for output */
+			ret = NSERROR_NOT_FOUND;
+			verbose_log = false;
+		} else {
+
+			/* ensure we actually show logging */
+			verbose_log = true;
+		}
+	} else {
+		/* default is logging to stderr */
+		logfile = stderr;
+	}
+
+	/* ensure output file handle is correctly configured */
+	if ((verbose_log == true) &&
+	    (ensure != NULL) &&
+	    (ensure(logfile) == false)) {
+		/* failed to ensure output configuration */
+		ret = NSERROR_INIT_FAILED;
+		verbose_log = false;
+	}
+
+#ifdef WITH_NSLOG
+
+	if (nslog_set_filter(verbose_log ?
+			     NETSURF_BUILTIN_VERBOSE_FILTER :
+			     NETSURF_BUILTIN_LOG_FILTER) != NSERROR_OK) {
+		ret = NSERROR_INIT_FAILED;
+		verbose_log = false;
+	} else if (nslog_set_render_callback(netsurf_render_log, NULL) != NSLOG_NO_ERROR) {
+		ret = NSERROR_INIT_FAILED;
+		verbose_log = false;
+	} else if (nslog_uncork() != NSLOG_NO_ERROR) {
+		ret = NSERROR_INIT_FAILED;
+		verbose_log = false;
+	}
+
+#endif
+
+	/* sucessfull logging initialisation so log system info */
+	if (ret == NSERROR_OK) {
+		NSLOG(netsurf, INFO, "NetSurf version '%s'", netsurf_version);
+		if (uname(&utsname) < 0) {
+			NSLOG(netsurf, INFO,
+			      "Failed to extract machine information");
+		} else {
+			NSLOG(netsurf, INFO,
+			      "NetSurf on <%s>, node <%s>, release <%s>, version <%s>, machine <%s>",
+			      utsname.sysname,
+			      utsname.nodename,
+			      utsname.release,
+			      utsname.version,
+			      utsname.machine);
+		}
+	}
+
+	return ret;
+}
+
+/* exported interface documented in utils/log.h */
+nserror
+nslog_set_filter_by_options()
+{
+	if (verbose_log)
+		return nslog_set_filter(nsoption_charp(verbose_filter));
+	else
+		return nslog_set_filter(nsoption_charp(log_filter));
+}
+
+/* exported interface documented in utils/log.h */
+void
+nslog_finalise()
+{
+	NSLOG(netsurf, INFO,
+	      "Finalising logging, please report any further messages");
+	verbose_log = true;
+	if (logfile != stderr) {
+		fclose(logfile);
+		logfile = stderr;
+	}
+#ifdef WITH_NSLOG
+	nslog_cleanup();
+#endif
+}

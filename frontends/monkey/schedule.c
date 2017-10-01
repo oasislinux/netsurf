@@ -24,12 +24,6 @@
 
 #include "monkey/schedule.h"
 
-#ifdef DEBUG_SCHEDULER
-#define SRLOG(x...) LOG(x)
-#else
-#define SRLOG(x...) ((void) 0)
-#endif
-
 /* linked list of scheduled callbacks */
 static struct nscallback *schedule_list = NULL;
 
@@ -63,7 +57,7 @@ static nserror schedule_remove(void (*callback)(void *p), void *p)
 		return NSERROR_OK;
 	}
 
-	SRLOG("removing %p, %p", callback, p);
+	NSLOG(schedule, DEBUG, "removing %p, %p", callback, p);
 
 	cur_nscb = schedule_list;
 	prev_nscb = NULL;
@@ -73,7 +67,7 @@ static nserror schedule_remove(void (*callback)(void *p), void *p)
 		    (cur_nscb->p ==  p)) {
 			/* item to remove */
 
-			SRLOG("callback entry %p removing  %p(%p)",
+			NSLOG(schedule, DEBUG, "callback entry %p removing  %p(%p)",
 			      cur_nscb, cur_nscb->callback, cur_nscb->p);
 
 			/* remove callback */
@@ -109,7 +103,7 @@ nserror monkey_schedule(int tival, void (*callback)(void *p), void *p)
 		return ret;
 	}
 
-	SRLOG("Adding %p(%p) in %d", callback, p, tival);
+	NSLOG(schedule, DEBUG, "Adding %p(%p) in %d", callback, p, tival);
 
 	tv.tv_sec = tival / 1000; /* miliseconds to seconds */
 	tv.tv_usec = (tival % 1000) * 1000; /* remainder to microseconds */
@@ -190,8 +184,8 @@ int monkey_schedule_run(void)
 	/* make rettime relative to now */
 	timersub(&nexttime, &tv, &rettime);
 
-	SRLOG("returning time to next event as %ldms",
-	      (rettime.tv_sec * 1000) + (rettime.tv_usec / 1000));
+	NSLOG(schedule, DEBUG, "returning time to next event as %ldms",
+	      (long)((rettime.tv_sec * 1000) + (rettime.tv_usec / 1000)));
 
 	/* return next event time in milliseconds (24days max wait) */
 	return (rettime.tv_sec * 1000) + (rettime.tv_usec / 1000);
@@ -204,13 +198,14 @@ void monkey_schedule_list(void)
 
 	gettimeofday(&tv, NULL);
 
-	LOG("schedule list at %lld:%ld", (long long)tv.tv_sec, tv.tv_usec);
+	NSLOG(netsurf, INFO, "schedule list at %lld:%ld",
+	      (long long)tv.tv_sec, tv.tv_usec);
 
 	cur_nscb = schedule_list;
 
 	while (cur_nscb != NULL) {
-		LOG("Schedule %p at %lld:%ld",
-		    cur_nscb, (long long)cur_nscb->tv.tv_sec, cur_nscb->tv.tv_usec);
+		NSLOG(netsurf, INFO, "Schedule %p at %lld:%ld", cur_nscb,
+		      (long long)cur_nscb->tv.tv_sec, cur_nscb->tv.tv_usec);
 		cur_nscb = cur_nscb->next;
 	}
 }

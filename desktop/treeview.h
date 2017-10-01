@@ -76,7 +76,8 @@ typedef enum {
 	TREEVIEW_NO_MOVES	= (1 << 0),	/**< No node drags */
 	TREEVIEW_NO_DELETES	= (1 << 1),	/**< No node deletes */
 	TREEVIEW_READ_ONLY	= TREEVIEW_NO_MOVES | TREEVIEW_NO_DELETES,
-	TREEVIEW_DEL_EMPTY_DIRS	= (1 << 2)	/**< Delete dirs on empty */
+	TREEVIEW_DEL_EMPTY_DIRS	= (1 << 2),	/**< Delete dirs on empty */
+	TREEVIEW_SEARCHABLE     = (1 << 3),	/**< Treeview has search bar */
 } treeview_flags;
 
 /**
@@ -113,11 +114,12 @@ struct treeview_node_msg {
  * treeview field flags
  */
 enum treeview_field_flags {
-	TREE_FLAG_NONE		= 0,		/**< No flags set */
-	TREE_FLAG_ALLOW_EDIT	= (1 << 0),	/**< Whether allow edit field */
-	TREE_FLAG_DEFAULT	= (1 << 1),	/**< Whether field is default */
-	TREE_FLAG_SHOW_NAME	= (1 << 2),	/**< Whether field name shown */
-	TREE_FLAG_COPY_TEXT	= (1 << 3)	/**< Whether to copy to clipb */
+	TREE_FLAG_NONE          = 0,        /**< No flags set */
+	TREE_FLAG_ALLOW_EDIT    = (1 << 0), /**< Whether allow edit field */
+	TREE_FLAG_DEFAULT       = (1 << 1), /**< Whether field is default */
+	TREE_FLAG_SHOW_NAME     = (1 << 2), /**< Whether field name shown */
+	TREE_FLAG_COPY_TEXT     = (1 << 3), /**< Whether to copy to clipb */
+	TREE_FLAG_SEARCHABLE    = (1 << 4), /**< Whether field is searchable */
 };
 
 

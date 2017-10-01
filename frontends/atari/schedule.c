@@ -23,14 +23,9 @@
 
 #include "utils/sys_time.h"
 #include "utils/errors.h"
+#include "utils/log.h"
 
 #include "atari/schedule.h"
-
-#ifdef DEBUG_SCHEDULER
-#include "utils/log.h"
-#else
-#define LOG(x...)
-#endif
 
 #define MS_NOW() ((clock() * 1000) / CLOCKS_PER_SEC)
 
@@ -71,7 +66,7 @@ static nserror schedule_remove(void (*callback)(void *p), void *p)
                 return NSERROR_OK;
 	}
 
-	LOG("removing %p, %p", callback, p);
+	NSLOG(schedule, DEBUG, "removing %p, %p", callback, p);
 
 	cur_nscb = schedule_list;
 	prev_nscb = NULL;
@@ -80,7 +75,9 @@ static nserror schedule_remove(void (*callback)(void *p), void *p)
 		if ((cur_nscb->callback ==  callback) &&
                     (cur_nscb->p ==  p)) {
 			/* item to remove */
-			LOG("callback entry %p removing  %p(%p)", cur_nscb, cur_nscb->callback, cur_nscb->p);
+			NSLOG(schedule, DEBUG,
+			      "callback entry %p removing  %p(%p)", cur_nscb,
+			      cur_nscb->callback, cur_nscb->p);
 
 			/* remove callback */
 			unlnk_nscb = cur_nscb;
@@ -118,7 +115,8 @@ nserror atari_schedule(int ival, void (*callback)(void *p), void *p)
 
 	nscb->timeout = MS_NOW() + ival;
 
-	LOG("adding callback %p for  %p(%p) at %d ms", nscb, callback, p, nscb->timeout);
+	NSLOG(schedule, DEBUG, "adding callback %p for  %p(%p) at %d ms", nscb,
+	      callback, p, nscb->timeout);
 
 	nscb->callback = callback;
 	nscb->p = p;
@@ -164,7 +162,9 @@ int schedule_run(void)
 				prev_nscb->next = unlnk_nscb->next;
 			}
 
-			LOG("callback entry %p running %p(%p)", unlnk_nscb, unlnk_nscb->callback, unlnk_nscb->p);
+			NSLOG(schedule, DEBUG,
+			      "callback entry %p running %p(%p)", unlnk_nscb,
+			      unlnk_nscb->callback, unlnk_nscb->p);
 
 			/* call callback */
 			unlnk_nscb->callback(unlnk_nscb->p);
@@ -173,7 +173,7 @@ int schedule_run(void)
 
 			/* need to deal with callback modifying the list. */
 			if (schedule_list == NULL) 	{
-				LOG("schedule_list == NULL");
+				NSLOG(schedule, DEBUG, "schedule_list == NULL");
 
 				return -1; /* no more callbacks scheduled */
 			}
@@ -198,7 +198,8 @@ int schedule_run(void)
 	/* make rettime relative to now and convert to ms */
 	nexttime = nexttime - now;
 
-	LOG("returning time to next event as %ldms", nexttime);
+	NSLOG(schedule, DEBUG, "returning time to next event as %ldms",
+	      nexttime);
 
 	/*return next event time in milliseconds (24days max wait) */
 	return nexttime;
@@ -210,14 +211,15 @@ void list_schedule(void)
 {
 	struct nscallback *cur_nscb;
 
-	LOG("schedule list at ms clock %ld", MS_NOW());
+	NSLOG(schedule, DEBUG, "schedule list at ms clock %ld", MS_NOW());
 
 	cur_nscb = schedule_list;
 	while (cur_nscb != NULL) {
-		LOG("Schedule %p at %ld", cur_nscb, cur_nscb->timeout);
+		NSLOG(schedule, DEBUG, "Schedule %p at %ld", cur_nscb,
+		      cur_nscb->timeout);
 		cur_nscb = cur_nscb->next;
 	}
-	LOG("Maxmium callbacks scheduled: %d", max_scheduled);
+	NSLOG(schedule, DEBUG, "Maxmium callbacks scheduled: %d", max_scheduled);
 }
 
 

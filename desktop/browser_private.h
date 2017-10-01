@@ -45,6 +45,9 @@ struct history_page {
 	struct nsurl *url;    /**< Page URL, never NULL. */
 	lwc_string *frag_id; /** Fragment identifier, or NULL. */
 	char *title;  /**< Page title, never NULL. */
+	struct bitmap *bitmap;  /**< Thumbnail bitmap, or NULL. */
+	float scroll_x; /**< Scroll X offset when visited */
+	float scroll_y; /**< Scroll Y offset when visited */
 };
 
 /**
@@ -61,7 +64,6 @@ struct history_entry {
 	unsigned int children;  /**< Number of children. */
 	int x;  /**< Position of node. */
 	int y;  /**< Position of node. */
-	struct bitmap *bitmap;  /**< Thumbnail bitmap, or 0. */
 };
 
 /**
@@ -325,7 +327,7 @@ nserror browser_window_history_add(struct browser_window *bw,
 		struct hlcache_handle *content, lwc_string *frag_id);
 
 /**
- * Update the thumbnail for the current entry.
+ * Update the thumbnail and scroll offsets for the current entry.
  *
  * \param bw The browser window to update the history within.
  * \param content content for current entry
@@ -333,6 +335,17 @@ nserror browser_window_history_add(struct browser_window *bw,
  */
 nserror browser_window_history_update(struct browser_window *bw,
 		struct hlcache_handle *content);
+
+/**
+ * Retrieve the stored scroll offsets for the current history entry
+ *
+ * \param bw The browser window to retrieve scroll offsets for.
+ * \param sx Pointer to a float for the X scroll offset
+ * \param sy Pointer to a float for the Y scroll offset
+ * \return NSERROR_OK or error code on failure.
+ */
+nserror browser_window_history_get_scroll(struct browser_window *bw,
+					  float *sx, float *sy);
 
 /**
  * Free a history structure.

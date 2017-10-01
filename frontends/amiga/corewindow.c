@@ -315,7 +315,7 @@ static void ami_cw_redraw_queue(struct ami_corewindow *ami_cw, bool draw)
 	if(IsMinListEmpty(ami_cw->deferred_rects)) return;
 
 	if(draw == false) {
-		LOG("Ignoring deferred box redraw queue");
+		NSLOG(netsurf, INFO, "Ignoring deferred box redraw queue");
 	} // else should probably show busy pointer
 
 	node = (struct nsObject *)GetHead((struct List *)ami_cw->deferred_rects);
@@ -378,7 +378,8 @@ ami_cw_redraw(struct ami_corewindow *ami_cw, const struct rect *restrict r)
 		nsobj = AddObject(ami_cw->deferred_rects, AMINS_RECT);
 		nsobj->objstruct = deferred_rect;
 	} else {
-		LOG("Ignoring duplicate or subset of queued box redraw");
+		NSLOG(netsurf, INFO,
+		      "Ignoring duplicate or subset of queued box redraw");
 	}
 	ami_schedule(1, ami_cw_redraw_cb, ami_cw);
 }
@@ -525,7 +526,8 @@ HOOKF(void, ami_cw_idcmp_hook, Object *, object, struct IntuiMessage *)
 		break;
 
 		default:
-			LOG("IDCMP hook unhandled event: %ld", msg->Class);
+			NSLOG(netsurf, INFO,
+			      "IDCMP hook unhandled event: %ld", msg->Class);
 		break;
 	}
 } 

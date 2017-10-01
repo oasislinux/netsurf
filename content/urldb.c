@@ -202,7 +202,6 @@ struct path_data {
 	char **fragment;	/**< Array of fragments */
 	bool persistent;	/**< This entry should persist */
 
-	struct bitmap *thumb;	/**< Thumbnail image of resource */
 	struct url_internal_data urld;	/**< URL data for resource */
 
 	/**
@@ -662,7 +661,8 @@ static bool urldb__host_is_ip_address(const char *host)
 		c[slash - host] = '\0';
 		sane_host = c;
 		host_len = slash - host;
-		LOG("WARNING: called with non-host '%s'", host);
+		NSLOG(netsurf, INFO, "WARNING: called with non-host '%s'",
+		      host);
 	}
 
 	if (strspn(sane_host, "0123456789abcdefABCDEF[].:") < host_len)
@@ -1292,7 +1292,7 @@ urldb_match_path(const struct path_data *parent,
 	assert(parent->segment == NULL);
 
 	if (path[0] != '/') {
-		LOG("path is %s", path);
+		NSLOG(netsurf, INFO, "path is %s", path);
 	}
 
 	assert(path[0] == '/');
@@ -1422,12 +1422,14 @@ static void urldb_dump_paths(struct path_data *parent)
 
 	do {
 		if (p->segment != NULL) {
-			LOG("\t%s : %u", lwc_string_data(p->scheme), p->port);
+			NSLOG(netsurf, INFO, "\t%s : %u",
+			      lwc_string_data(p->scheme), p->port);
 
-			LOG("\t\t'%s'", p->segment);
+			NSLOG(netsurf, INFO, "\t\t'%s'", p->segment);
 
 			for (i = 0; i != p->frag_cnt; i++) {
-				LOG("\t\t\t#%s", p->fragment[i]);
+				NSLOG(netsurf, INFO, "\t\t\t#%s",
+				      p->fragment[i]);
 			}
 		}
 
@@ -1457,10 +1459,10 @@ static void urldb_dump_hosts(struct host_part *parent)
 	struct host_part *h;
 
 	if (parent->part) {
-		LOG("%s", parent->part);
+		NSLOG(netsurf, INFO, "%s", parent->part);
 
-		LOG("\t%s invalid SSL certs",
-		    parent->permit_invalid_certs ? "Permits" : "Denies");
+		NSLOG(netsurf, INFO, "\t%s invalid SSL certs",
+		      parent->permit_invalid_certs ? "Permits" : "Denies");
 	}
 
 	/* Dump path data */
@@ -1512,7 +1514,7 @@ static void urldb_dump_search(struct search_node *parent, int depth)
 	}
 	s[i]= 0;
 
-	LOG("%s", s);
+	NSLOG(netsurf, INFO, "%s", s);
 
 	urldb_dump_search(parent->right, depth + 1);
 }
@@ -2699,10 +2701,6 @@ static void urldb_destroy_path_node_content(struct path_data *node)
 		free(node->fragment[i]);
 	free(node->fragment);
 
-	if (node->thumb) {
-		guit->bitmap->destroy(node->thumb);
-	}
-
 	free(node->urld.title);
 
 	for (a = node->cookies; a; a = b) {
@@ -2866,14 +2864,15 @@ nserror urldb_load(const char *filename)
 
 	assert(filename);
 
-	LOG("Loading URL file %s", filename);
+	NSLOG(netsurf, INFO, "Loading URL file %s", filename);
 
 	if (url_bloom == NULL)
 		url_bloom = bloom_create(BLOOM_SIZE);
 
 	fp = fopen(filename, "r");
 	if (!fp) {
-		LOG("Failed to open file '%s' for reading", filename);
+		NSLOG(netsurf, INFO, "Failed to open file '%s' for reading",
+		      filename);
 		return NSERROR_NOT_FOUND;
 	}
 
@@ -2884,12 +2883,12 @@ nserror urldb_load(const char *filename)
 
 	version = atoi(s);
 	if (version < MIN_URL_FILE_VERSION) {
-		LOG("Unsupported URL file version.");
+		NSLOG(netsurf, INFO, "Unsupported URL file version.");
 		fclose(fp);
 		return NSERROR_INVALID;
 	}
 	if (version > URL_FILE_VERSION) {
-		LOG("Unknown URL file version.");
+		NSLOG(netsurf, INFO, "Unknown URL file version.");
 		fclose(fp);
 		return NSERROR_INVALID;
 	}
@@ -2919,13 +2918,13 @@ nserror urldb_load(const char *filename)
 
 		/* no URLs => try next host */
 		if (urls == 0) {
-			LOG("No URLs for '%s'", host);
+			NSLOG(netsurf, INFO, "No URLs for '%s'", host);
 			continue;
 		}
 
 		h = urldb_add_host(host);
 		if (!h) {
-			LOG("Failed adding host: '%s'", host);
+			NSLOG(netsurf, INFO, "Failed adding host: '%s'", host);
 			fclose(fp);
 			return NSERROR_NOMEM;
 		}
@@ -2976,7 +2975,8 @@ nserror urldb_load(const char *filename)
 			 *       Need a nsurl_save too.
 			 */
 			if (nsurl_create(url, &nsurl) != NSERROR_OK) {
-				LOG("Failed inserting '%s'", url);
+				NSLOG(netsurf, INFO, "Failed inserting '%s'",
+				      url);
 				fclose(fp);
 				return NSERROR_NOMEM;
 			}
@@ -2989,7 +2989,8 @@ nserror urldb_load(const char *filename)
 			/* Copy and merge path/query strings */
 			if (nsurl_get(nsurl, NSURL_PATH | NSURL_QUERY,
 				      &path_query, &len) != NSERROR_OK) {
-				LOG("Failed inserting '%s'", url);
+				NSLOG(netsurf, INFO, "Failed inserting '%s'",
+				      url);
 				fclose(fp);
 				return NSERROR_NOMEM;
 			}
@@ -3000,7 +3001,8 @@ nserror urldb_load(const char *filename)
 			p = urldb_add_path(scheme_lwc, port, h, path_query,
 					   fragment_lwc, nsurl);
 			if (!p) {
-				LOG("Failed inserting '%s'", url);
+				NSLOG(netsurf, INFO, "Failed inserting '%s'",
+				      url);
 				fclose(fp);
 				return NSERROR_NOMEM;
 			}
@@ -3044,7 +3046,7 @@ nserror urldb_load(const char *filename)
 	}
 
 	fclose(fp);
-	LOG("Successfully loaded URL file");
+	NSLOG(netsurf, INFO, "Successfully loaded URL file");
 #undef MAXIMUM_URL_LENGTH
 
 	return NSERROR_OK;
@@ -3060,7 +3062,8 @@ nserror urldb_save(const char *filename)
 
 	fp = fopen(filename, "w");
 	if (!fp) {
-		LOG("Failed to open file '%s' for writing", filename);
+		NSLOG(netsurf, INFO, "Failed to open file '%s' for writing",
+		      filename);
 		return NSERROR_SAVE_FAILED;
 	}
 
@@ -3457,48 +3460,6 @@ bool urldb_get_cert_permissions(nsurl *url)
 }
 
 
-/* exported interface documented in content/urldb.h */
-bool urldb_set_thumbnail(nsurl *url, struct bitmap *bitmap)
-{
-	struct path_data *p;
-
-	assert(url);
-
-	/* add url, in case it's missing */
-	urldb_add_url(url);
-
-	p = urldb_find_url(url);
-	if (p == NULL) {
-		return false;
-	}
-
-	LOG("Setting bitmap on %s", nsurl_access(url));
-
-	if ((p->thumb) && (p->thumb != bitmap)) {
-		guit->bitmap->destroy(p->thumb);
-	}
-
-	p->thumb = bitmap;
-
-	return true;
-}
-
-
-/* exported interface documented in netsurf/url_db.h */
-struct bitmap *urldb_get_thumbnail(nsurl *url)
-{
-	struct path_data *p;
-
-	assert(url);
-
-	p = urldb_find_url(url);
-	if (!p)
-		return NULL;
-
-	return p->thumb;
-}
-
-
 /* exported interface documented in netsurf/url_db.h */
 void
 urldb_iterate_partial(const char *prefix,
@@ -3754,7 +3715,8 @@ bool urldb_set_cookie(const char *header, nsurl *url, nsurl *referer)
 		}
 		suffix = nspsl_getpublicsuffix(dot);
 		if (suffix == NULL) {
-			LOG("domain %s was a public suffix domain", dot);
+			NSLOG(netsurf, INFO,
+			      "domain %s was a public suffix domain", dot);
 			urldb_free_cookie(c);
 			goto error;
 		}
@@ -4161,7 +4123,7 @@ void urldb_load_cookies(const char *filename)
 		for (; *p && *p != '\t'; p++)	\
 			; /* do nothing */	\
 		if (p >= end) {			\
-			LOG("Overran input");	\
+			NSLOG(netsurf, INFO, "Overran input");	\
 			continue;		\
 		}				\
 		*p++ = '\0';			\
@@ -4171,7 +4133,7 @@ void urldb_load_cookies(const char *filename)
 		for (; *p && *p == '\t'; p++)	\
 			; /* do nothing */	\
 		if (p >= end) {			\
-			LOG("Overran input");	\
+			NSLOG(netsurf, INFO, "Overran input");	\
 			continue;		\
 		}				\
 	}
@@ -4200,7 +4162,8 @@ void urldb_load_cookies(const char *filename)
 
 			if (loaded_cookie_file_version <
 			    MIN_COOKIE_FILE_VERSION) {
-				LOG("Unsupported Cookie file version");
+				NSLOG(netsurf, INFO,
+				      "Unsupported Cookie file version");
 				break;
 			}
 

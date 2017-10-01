@@ -500,7 +500,7 @@ bitmap_destroy(void *bitmap)
 static void
 bitmap_set_opaque(void *bitmap, bool opaque)
 {
-	LOG("bitmap_set_opaque: %d\n", opaque);
+	NSLOG(netsurf, DEBUG, "bitmap_set_opaque: %d\n", opaque);
 }
 
 static bool
@@ -513,7 +513,7 @@ bitmap_get_opaque(void *bitmap)
 static bool
 bitmap_test_opaque(void *bitmap)
 {
-	LOG("bitmap_test_opaque\n");
+	NSLOG(netsurf, DEBUG, "bitmap_test_opaque\n");
 	return false;
 }
 

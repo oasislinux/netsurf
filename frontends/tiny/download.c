@@ -72,7 +72,7 @@ download_data(struct gui_download_window *dw, const char *data, unsigned int siz
 static void
 download_error(struct gui_download_window *dw, const char *msg)
 {
-	LOG("download error: %s", msg);
+	NSLOG(netsurf, ERROR, "download error: %s", msg);
 }
 
 static void

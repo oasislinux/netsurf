@@ -342,7 +342,9 @@ bool ami_gui_map_filename(char **remapped, const char *restrict path,
 	}
 
 	if(found == false) *remapped = strdup(file);
-		else LOG("Remapped %s to %s in path %s using %s", file, *remapped, path, map);
+		else NSLOG(netsurf, INFO,
+			   "Remapped %s to %s in path %s using %s", file,
+			   *remapped, path, map);
 
 	free(mapfile);
 
@@ -365,7 +367,7 @@ static bool ami_gui_check_resource(char *fullpath, const char *file)
 		found = true;
 	}
 
-	if(found) LOG("Found %s", fullpath);
+	if(found) NSLOG(netsurf, INFO, "Found %s", fullpath);
 	free(remapped);
 
 	return found;
@@ -842,7 +844,7 @@ static void ami_openscreen(void)
 		}
 
 		if(screen_signal == -1) screen_signal = AllocSignal(-1);
-		LOG("Screen signal %d", screen_signal);
+		NSLOG(netsurf, INFO, "Screen signal %d", screen_signal);
 		scrn = OpenScreenTags(NULL,
 					/**\todo specify screen depth */
 					SA_DisplayID, id,
@@ -918,19 +920,22 @@ static struct RDArgs *ami_gui_commandline(int *restrict argc, char ** argv,
 
 	if((args = ReadArgs(template, rarray, NULL))) {
 		if(rarray[A_URL]) {
-			LOG("URL %s specified on command line",
-			    (char *)rarray[A_URL]);
+			NSLOG(netsurf, INFO,
+			      "URL %s specified on command line",
+			      (char *)rarray[A_URL]);
 			temp_homepage_url = strdup((char *)rarray[A_URL]); /**\todo allow IDNs */
 		}
 
 		if(rarray[A_USERSDIR]) {
-			LOG("USERSDIR %s specified on command line",
-			    (char *)rarray[A_USERSDIR]);
+			NSLOG(netsurf, INFO,
+			      "USERSDIR %s specified on command line",
+			      (char *)rarray[A_USERSDIR]);
 			users_dir = ASPrintf("%s", rarray[A_USERSDIR]);
 		}
 
 		if(rarray[A_FORCE]) {
-			LOG("FORCE specified on command line");
+			NSLOG(netsurf, INFO,
+			      "FORCE specified on command line");
 			cli_force = true;
 		}
 
@@ -950,7 +955,7 @@ static struct RDArgs *ami_gui_commandline(int *restrict argc, char ** argv,
 		 */
 		}
 	} else {
-		LOG("ReadArgs failed to parse command line");
+		NSLOG(netsurf, INFO, "ReadArgs failed to parse command line");
 	}
 
 	FreeArgs(args);
@@ -1220,12 +1225,10 @@ static void ami_update_buttons(struct gui_window_2 *gwin)
 		}
 	}
 
-#ifdef __amigaos4__
 	GetAttr(GA_Disabled, gwin->objects[GID_BACK], (uint32 *)&s_back);
 	GetAttr(GA_Disabled, gwin->objects[GID_FORWARD], (uint32 *)&s_forward);
 	GetAttr(GA_Disabled, gwin->objects[GID_RELOAD], (uint32 *)&s_reload);
 	GetAttr(GA_Disabled, gwin->objects[GID_STOP], (uint32 *)&s_stop);
-#endif
 
 	if(BOOL_MISMATCH(s_back, back))
 		SetGadgetAttrs((struct Gadget *)gwin->objects[GID_BACK],
@@ -1245,9 +1248,9 @@ static void ami_update_buttons(struct gui_window_2 *gwin)
 
 	if(ClickTabBase->lib_Version < 53) {
 		if(gwin->tabs <= 1) tabclose = TRUE;
-#ifdef __amigaos4__
+
 		GetAttr(GA_Disabled, gwin->objects[GID_CLOSETAB], (uint32 *)&s_tabclose);
-#endif
+
 		if(BOOL_MISMATCH(s_tabclose, tabclose))
 			SetGadgetAttrs((struct Gadget *)gwin->objects[GID_CLOSETAB],
 				gwin->win, NULL, GA_Disabled, tabclose, TAG_DONE);
@@ -2522,10 +2525,9 @@ static BOOL ami_gui_event(void *w)
 #ifdef __amigaos4__
 			case WMHI_ICONIFY:
 			{
-				struct bitmap *bm;
-
-				bm = urldb_get_thumbnail(browser_window_get_url(gwin->gw->bw));
-				if(!bm) bm = content_get_bitmap(browser_window_get_content(gwin->gw->bw));
+				struct bitmap *bm = NULL;
+				browser_window_history_get_thumbnail(gwin->gw->bw,
+								     &bm);
 				gwin->dobj = amiga_icon_from_bitmap(bm);
 				amiga_icon_superimpose_favicon_internal(gwin->gw->favicon,
 					gwin->dobj);
@@ -2790,7 +2792,9 @@ static void ami_handle_applib(void)
 			{
 				struct ApplicationCustomMsg *applibcustmsg =
 					(struct ApplicationCustomMsg *)applibmsg;
-				LOG("Ringhio BackMsg received: %s", applibcustmsg->customMsg);
+				NSLOG(netsurf, INFO,
+				      "Ringhio BackMsg received: %s",
+				      applibcustmsg->customMsg);
 
 				ami_download_parse_backmsg(applibcustmsg->customMsg);
 			}
@@ -2826,7 +2830,7 @@ void ami_get_msg(void)
 				NULL, (unsigned int *)&signalmask) != -1) {
 			signal = signalmask;
 		} else {
-			LOG("waitselect() returned error");
+			NSLOG(netsurf, INFO, "waitselect() returned error");
 			/* \todo Fix Ctrl-C handling.
 			 * WaitSelect() from bsdsocket.library returns -1 if the task was
 			 * signalled with a Ctrl-C.  waitselect() from newlib.library does not.
@@ -3035,11 +3039,13 @@ static void ami_gui_close_screen(struct Screen *scrn, BOOL locked_screen, BOOL d
 	if(donotwait == TRUE) return;
 
 	ULONG scrnsig = 1 << screen_signal;
-	LOG("Waiting for visitor windows to close... (signal)");
+	NSLOG(netsurf, INFO,
+	      "Waiting for visitor windows to close... (signal)");
 	Wait(scrnsig);
 
 	while (CloseScreen(scrn) == FALSE) {
-		LOG("Waiting for visitor windows to close... (polling)");
+		NSLOG(netsurf, INFO,
+		      "Waiting for visitor windows to close... (polling)");
 		Delay(50);
 	}
 
@@ -3081,11 +3087,11 @@ static void gui_quit(void)
 	ami_font_fini();
 	ami_help_free();
 	
-	LOG("Freeing menu items");
+	NSLOG(netsurf, INFO, "Freeing menu items");
 	ami_ctxmenu_free();
 	ami_menu_free_glyphs();
 
-	LOG("Freeing mouse pointers");
+	NSLOG(netsurf, INFO, "Freeing mouse pointers");
 	ami_mouse_pointers_free();
 
 	ami_file_req_free();
@@ -3099,7 +3105,7 @@ static void gui_quit(void)
 	ami_clipboard_free();
 	ami_gui_resources_free();
 
-	LOG("Closing screen");
+	NSLOG(netsurf, INFO, "Closing screen");
 	ami_gui_close_screen(scrn, locked_screen, FALSE);
 	if(nsscreentitle) FreeVec(nsscreentitle);
 }
@@ -3109,7 +3115,7 @@ char *ami_gui_get_cache_favicon_name(nsurl *url, bool only_if_avail)
 	STRPTR filename = NULL;
 
 	if ((filename = ASPrintf("%s/%x", current_user_faviconcache, nsurl_hash(url)))) {
-		LOG("favicon cache location: %s", filename);
+		NSLOG(netsurf, INFO, "favicon cache location: %s", filename);
 
 		if (only_if_avail == true) {
 			BPTR lock = 0;
@@ -3723,7 +3729,8 @@ static nserror amiga_window_invalidate_area(struct gui_window *g,
 			nsobj = AddObject(g->deferred_rects, AMINS_RECT);
 			nsobj->objstruct = deferred_rect;
 		} else {
-			LOG("Ignoring duplicate or subset of queued box redraw");
+			NSLOG(netsurf, INFO,
+			      "Ignoring duplicate or subset of queued box redraw");
 		}
 	}
 	ami_schedule_redraw(g->shared, false);
@@ -3853,7 +3860,8 @@ HOOKF(void, ami_scroller_hook, Object *, object, struct IntuiMessage *)
 		break;
 
 		default:
-			LOG("IDCMP hook unhandled event: %ld", msg->Class);
+			NSLOG(netsurf, INFO,
+			      "IDCMP hook unhandled event: %ld", msg->Class);
 		break;
 	}
 //	ReplyMsg((struct Message *)msg);
@@ -3912,7 +3920,7 @@ gui_window_create(struct browser_window *bw,
 	ULONG defer_layout = TRUE;
 	ULONG idcmp_sizeverify = IDCMP_SIZEVERIFY;
 
-	LOG("Creating window");
+	NSLOG(netsurf, INFO, "Creating window");
 
 	if (!scrn) ami_openscreenfirst();
 
@@ -4056,7 +4064,7 @@ gui_window_create(struct browser_window *bw,
 		    (strcmp(nsoption_charp(pubscreen_name), "Workbench") == 0))
 				iconifygadget = TRUE;
 
-		LOG("Creating menu");
+		NSLOG(netsurf, INFO, "Creating menu");
 		struct Menu *menu = ami_gui_menu_create(g->shared);
 
 		NewList(&g->shared->tab_list);
@@ -4178,7 +4186,7 @@ gui_window_create(struct browser_window *bw,
 					BitMapEnd;
 		}
 
-		LOG("Creating window object");
+		NSLOG(netsurf, INFO, "Creating window object");
 
 		g->shared->objects[OID_MAIN] = WindowObj,
 			WA_ScreenTitle, ami_gui_get_screen_title(),
@@ -4456,11 +4464,11 @@ gui_window_create(struct browser_window *bw,
 		EndWindow;
 	}
 
-	LOG("Opening window");
+	NSLOG(netsurf, INFO, "Opening window");
 
 	g->shared->win = (struct Window *)RA_OpenWindow(g->shared->objects[OID_MAIN]);
 
-	LOG("Window opened, adding border gadgets");
+	NSLOG(netsurf, INFO, "Window opened, adding border gadgets");
 
 	if(!g->shared->win)
 	{
@@ -4796,7 +4804,7 @@ static void ami_gui_window_update_box_deferred(struct gui_window *g, bool draw)
 	if(draw == true) {
 		ami_set_pointer(g->shared, GUI_POINTER_WAIT, false);
 	} else {
-		LOG("Ignoring deferred box redraw queue");
+		NSLOG(netsurf, INFO, "Ignoring deferred box redraw queue");
 	}
 
 	node = (struct nsObject *)GetHead((struct List *)g->deferred_rects);
@@ -4841,7 +4849,8 @@ bool ami_gui_window_update_box_deferred_check(struct MinList *deferred_rects,
 			(new_rect->y0 <= rect->y0) &&
 			(new_rect->x1 >= rect->x1) &&
 			(new_rect->y1 >= rect->y1)) {
-			LOG("Removing queued redraw that is a subset of new box redraw");
+			NSLOG(netsurf, INFO,
+			      "Removing queued redraw that is a subset of new box redraw");
 			ami_memory_itempool_free(mempool, node->objstruct, sizeof(struct rect));
 			DelObjectNoFree(node);
 			/* Don't return - we might find more */
@@ -5414,20 +5423,20 @@ Object *ami_gui_splash_open(void)
 			EndWindow;
 
 	if(win_obj == NULL) {
-		LOG("Splash window object not created");
+		NSLOG(netsurf, INFO, "Splash window object not created");
 		return NULL;
 	}
 
-	LOG("Attempting to open splash window...");
+	NSLOG(netsurf, INFO, "Attempting to open splash window...");
 	win = RA_OpenWindow(win_obj);
 
 	if(win == NULL) {
-		LOG("Splash window did not open");
+		NSLOG(netsurf, INFO, "Splash window did not open");
 		return NULL;
 	}
 
 	if(bm_obj == NULL) {
-		LOG("BitMap object not created");
+		NSLOG(netsurf, INFO, "BitMap object not created");
 		return NULL;
 	}
 
@@ -5489,14 +5498,14 @@ void ami_gui_splash_close(Object *win_obj)
 {
 	if(win_obj == NULL) return;
 
-	LOG("Closing splash window");
+	NSLOG(netsurf, INFO, "Closing splash window");
 	DisposeObject(win_obj);
 }
 
 static void gui_file_gadget_open(struct gui_window *g, struct hlcache_handle *hl, 
 	struct form_control *gadget)
 {
-	LOG("File open dialog request for %p/%p", g, gadget);
+	NSLOG(netsurf, INFO, "File open dialog request for %p/%p", g, gadget);
 
 	if(AslRequestTags(filereq,
 			ASLFR_Window, g->shared->win,
@@ -5531,7 +5540,7 @@ static char *ami_gui_get_user_dir(STRPTR current_user)
 		user = GetVar("user", temp, 1024, GVF_GLOBAL_ONLY);
 		current_user = ASPrintf("%s", (user == -1) ? "Default" : temp);
 	}
-	LOG("User: %s", current_user);
+	NSLOG(netsurf, INFO, "User: %s", current_user);
 
 	if(users_dir == NULL) {
 		users_dir = ASPrintf("%s", USERS_DIR);
@@ -5583,7 +5592,7 @@ static char *ami_gui_get_user_dir(STRPTR current_user)
 	FreeVec(users_dir);
 	FreeVec(current_user);
 
-	LOG("User dir: %s", current_user_dir);
+	NSLOG(netsurf, INFO, "User dir: %s", current_user_dir);
 
 	if((lock = CreateDirTree(current_user_dir)))
 		UnLock(lock);
@@ -5810,7 +5819,7 @@ int main(int argc, char** argv)
 	AddPart(script, nsoption_charp(arexx_startup), 1024);
 	ami_arexx_execute(script);
 
-	LOG("Entering main loop");
+	NSLOG(netsurf, INFO, "Entering main loop");
 
 	while (!ami_quit) {
 		ami_get_msg();
@@ -5828,6 +5837,9 @@ int main(int argc, char** argv)
 	ami_nsoption_free();
 	free(current_user_dir);
 	FreeVec(current_user_faviconcache);
+
+	/* finalise logging */
+	nslog_finalise();
 
 #ifndef __amigaos4__
 	/* OS3 low memory handler */

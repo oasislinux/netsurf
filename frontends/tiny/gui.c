@@ -69,7 +69,7 @@ tiny_quit(void)
 static nserror
 tiny_launch_url(struct nsurl *url)
 {
-	LOG("launch url %s\n", nsurl_access(url));
+	NSLOG(netsurf, DEBUG, "launch url %s\n", nsurl_access(url));
 	return NSERROR_NO_FETCH_HANDLER;
 }
 
@@ -233,6 +233,7 @@ main(int argc, char *argv[])
 	nsoption_finalise(nsoptions, nsoptions_default);
 	search_web_finalise();
 	render_finalize();
+	nslog_finalise();
 
 	return 0;
 }

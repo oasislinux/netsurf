@@ -576,7 +576,9 @@ static nserror cookie_manager_init_entry_fields(void)
 		goto error;
 	}
 
-	cm_ctx.fields[COOKIE_M_DOMAIN].flags = TREE_FLAG_SHOW_NAME;
+	cm_ctx.fields[COOKIE_M_DOMAIN].flags =
+			TREE_FLAG_SHOW_NAME |
+			TREE_FLAG_SEARCHABLE;
 	label = "TreeviewLabelDomain";
 	label = messages_get(label);
 	if (lwc_intern_string(label, strlen(label),
@@ -718,7 +720,8 @@ static void cookie_manager_delete_entry(struct cookie_manager_entry *e)
 			
 			urldb_delete_cookie(domain, path, name);
 		} else {
-			LOG("Delete cookie fail: ""need domain, path, and name.");
+			NSLOG(netsurf, INFO,
+			      "Delete cookie fail: ""need domain, path, and name.");
 		}
 	}
 
@@ -788,7 +791,7 @@ nserror cookie_manager_init(struct core_window_callback_table *cw_t,
 		return err;
 	}
 
-	LOG("Generating cookie manager data");
+	NSLOG(netsurf, INFO, "Generating cookie manager data");
 
 	/* Init. cookie manager treeview entry fields */
 	err = cookie_manager_init_entry_fields();
@@ -808,7 +811,9 @@ nserror cookie_manager_init(struct core_window_callback_table *cw_t,
 	err = treeview_create(&cm_ctx.tree, &cm_tree_cb_t,
 			COOKIE_M_N_FIELDS, cm_ctx.fields,
 			cw_t, core_window_handle,
-			TREEVIEW_NO_MOVES | TREEVIEW_DEL_EMPTY_DIRS);
+			TREEVIEW_NO_MOVES |
+			TREEVIEW_DEL_EMPTY_DIRS |
+			TREEVIEW_SEARCHABLE);
 	if (err != NSERROR_OK) {
 		cm_ctx.tree = NULL;
 		return err;
@@ -825,7 +830,7 @@ nserror cookie_manager_init(struct core_window_callback_table *cw_t,
 	/* Inform client of window height */
 	treeview_get_height(cm_ctx.tree);
 
-	LOG("Generated cookie manager data");
+	NSLOG(netsurf, INFO, "Generated cookie manager data");
 
 	return NSERROR_OK;
 }
@@ -837,7 +842,7 @@ nserror cookie_manager_fini(void)
 	int i;
 	nserror err;
 
-	LOG("Finalising cookie manager");
+	NSLOG(netsurf, INFO, "Finalising cookie manager");
 
 	cm_ctx.built = false;
 
@@ -860,7 +865,7 @@ nserror cookie_manager_fini(void)
 		return err;
 	}
 
-	LOG("Finalised cookie manager");
+	NSLOG(netsurf, INFO, "Finalised cookie manager");
 
 	return err;
 }

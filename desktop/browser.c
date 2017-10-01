@@ -171,7 +171,7 @@ browser_window_redraw(struct browser_window *bw,
 	nserror res;
 
 	if (bw == NULL) {
-		LOG("NULL browser window");
+		NSLOG(netsurf, INFO, "NULL browser window");
 		return false;
 	}
 
@@ -336,7 +336,7 @@ browser_window_redraw(struct browser_window *bw,
 bool browser_window_redraw_ready(struct browser_window *bw)
 {
 	if (bw == NULL) {
-		LOG("NULL browser window");
+		NSLOG(netsurf, INFO, "NULL browser window");
 		return false;
 	} else if (bw->current_content != NULL) {
 		/* Can't render locked contents */
@@ -415,7 +415,8 @@ void browser_window_set_position(struct browser_window *bw, int x, int y)
 		bw->x = x;
 		bw->y = y;
 	} else {
-		LOG("Asked to set position of front end window.");
+		NSLOG(netsurf, INFO,
+		      "Asked to set position of front end window.");
 		assert(0);
 	}
 }
@@ -811,7 +812,7 @@ nserror browser_window_debug(struct browser_window *bw, enum content_debug op)
 static bool slow_script(void *ctx)
 {
 	static int count = 0;
-	LOG("Continuing execution %d", count);
+	NSLOG(netsurf, INFO, "Continuing execution %d", count);
 	count++;
 	if (count > 1) {
 		count = 0;
@@ -886,7 +887,7 @@ nserror browser_window_create(enum browser_window_create_flags flags,
 	}
 
 	if (url != NULL) {
-		enum browser_window_nav_flags nav_flags = BW_NAVIGATE_NONE;
+		enum browser_window_nav_flags nav_flags = BW_NAVIGATE_NO_TERMINAL_HISTORY_UPDATE;
 		if (flags & BW_CREATE_UNVERIFIABLE)
 			nav_flags |= BW_NAVIGATE_UNVERIFIABLE;
 		if (flags & BW_CREATE_HISTORY)
@@ -982,11 +983,12 @@ browser_window_download(struct browser_window *bw,
 		/* no internal handler for this type, call out to frontend */
 		error = guit->misc->launch_url(url);
 	} else if (error != NSERROR_OK) {
-		LOG("Failed to fetch download: %d", error);
+		NSLOG(netsurf, INFO, "Failed to fetch download: %d", error);
 	} else {
 		error = download_context_create(l, root->window);
 		if (error != NSERROR_OK) {
-			LOG("Failed creating download context: %d", error);
+			NSLOG(netsurf, INFO,
+			      "Failed creating download context: %d", error);
 			llcache_handle_abort(l);
 			llcache_handle_release(l);
 		}
@@ -1114,7 +1116,8 @@ browser_window_favicon_callback(hlcache_handle *c,
 
 			error = nsurl_create("resource:favicon.ico", &nsurl);
 			if (error != NSERROR_OK) {
-				LOG("Unable to create default location url");
+				NSLOG(netsurf, INFO,
+				      "Unable to create default location url");
 			} else {
 				hlcache_handle_retrieve(nsurl,
 						HLCACHE_RETRIEVE_SNIFF_TYPE,
@@ -1204,7 +1207,8 @@ browser_window_update_favicon(hlcache_handle *c,
 			error = nsurl_create("resource:favicon.ico", &nsurl);
 		}
 		if (error != NSERROR_OK) {
-			LOG("Unable to create default location url");
+			NSLOG(netsurf, INFO,
+			      "Unable to create default location url");
 			return;
 		}
 	} else {
@@ -1212,9 +1216,11 @@ browser_window_update_favicon(hlcache_handle *c,
 	}
 
 	if (link == NULL) {
-		LOG("fetching general favicon from '%s'", nsurl_access(nsurl));
+		NSLOG(netsurf, INFO, "fetching general favicon from '%s'",
+		      nsurl_access(nsurl));
 	} else {
-		LOG("fetching favicon rel:%s '%s'", lwc_string_data(link->rel), nsurl_access(nsurl));
+		NSLOG(netsurf, INFO, "fetching favicon rel:%s '%s'",
+		      lwc_string_data(link->rel), nsurl_access(nsurl));
 	}
 
 	hlcache_handle_retrieve(nsurl, HLCACHE_RETRIEVE_SNIFF_TYPE,
@@ -1349,6 +1355,7 @@ browser_window_callback(hlcache_handle *c,
 {
 	struct browser_window *bw = pw;
 	nserror res = NSERROR_OK;
+	float sx, sy;
 
 	switch (event->type) {
 	case CONTENT_MSG_DOWNLOAD:
@@ -1398,23 +1405,6 @@ browser_window_callback(hlcache_handle *c,
 		bw->current_content = c;
 		bw->loading_content = NULL;
 
-		/* Format the new content to the correct dimensions */
-		browser_window_get_dimensions(bw, &width, &height, true);
-		content_reformat(c, false, width, height);
-
-		browser_window_remove_caret(bw, false);
-
-		if (bw->window != NULL) {
-			guit->window->new_content(bw->window);
-
-			browser_window_refresh_url_bar(bw);
-		}
-
-		/* new content; set scroll_to_top */
-		browser_window_update(bw, true);
-		content_open(c, bw, 0, 0);
-		browser_window_set_status(bw, content_get_status_message(c));
-
 		/* history */
 		if (bw->history_add && bw->history) {
 			nsurl *url = hlcache_handle_get_url(c);
@@ -1451,6 +1441,23 @@ browser_window_callback(hlcache_handle *c,
 			browser_window_history_add(bw, c, bw->frag_id);
 		}
 
+		/* Format the new content to the correct dimensions */
+		browser_window_get_dimensions(bw, &width, &height, true);
+		content_reformat(c, false, width, height);
+
+		browser_window_remove_caret(bw, false);
+
+		if (bw->window != NULL) {
+			guit->window->new_content(bw->window);
+
+			browser_window_refresh_url_bar(bw);
+		}
+
+		/* new content; set scroll_to_top */
+		browser_window_update(bw, true);
+		content_open(c, bw, 0, 0);
+		browser_window_set_status(bw, content_get_status_message(c));
+
 		/* frames */
 		if ((content_get_type(c) == CONTENT_HTML) &&
 		    (html_get_frameset(c) != NULL)) {
@@ -1478,6 +1485,19 @@ browser_window_callback(hlcache_handle *c,
 		browser_window_set_status(bw, content_get_status_message(c));
 		browser_window_stop_throbber(bw);
 		browser_window_update_favicon(c, bw, NULL);
+
+		if (browser_window_history_get_scroll(bw, &sx, &sy) == NSERROR_OK) {
+			int scrollx = (int)((float)content_get_width(bw->current_content) * sx);
+			int scrolly = (int)((float)content_get_height(bw->current_content) * sy);
+			struct rect rect;
+			rect.x0 = rect.x1 = scrollx;
+			rect.y0 = rect.y1 = scrolly;
+			if (browser_window_set_scroll(bw, &rect) != NSERROR_OK) {
+				NSLOG(netsurf, WARNING,
+				      "Unable to set browser scroll offsets to %d by %d",
+				      scrollx, scrolly);
+			}
+		}
 
 		browser_window_history_update(bw, c);
 		hotlist_update_url(hlcache_handle_get_url(c));
@@ -1811,7 +1831,7 @@ static void browser_window_destroy_internal(struct browser_window *bw)
 {
 	assert(bw);
 
-	LOG("Destroying window");
+	NSLOG(netsurf, INFO, "Destroying window");
 
 	if (bw->children != NULL || bw->iframes != NULL) {
 		browser_window_destroy_children(bw);
@@ -1831,7 +1851,8 @@ static void browser_window_destroy_internal(struct browser_window *bw)
 	/* The ugly cast here is so the reformat function can be
 	 * passed a gui window pointer in its API rather than void*
 	 */
-	LOG("Clearing reformat schedule for browser window %p", bw);
+	NSLOG(netsurf, INFO,
+	      "Clearing reformat schedule for browser window %p", bw);
 	guit->misc->schedule(-1, scheduled_reformat, bw);
 
 	/* If this brower window is not the root window, and has focus, unset
@@ -1911,7 +1932,8 @@ static void browser_window_destroy_internal(struct browser_window *bw)
 	free(bw->name);
 	free(bw->status.text);
 	bw->status.text = NULL;
-	LOG("Status text cache match:miss %d:%d", bw->status.match, bw->status.miss);
+	NSLOG(netsurf, INFO, "Status text cache match:miss %d:%d",
+	      bw->status.match, bw->status.miss);
 }
 
 /**
@@ -2004,14 +2026,28 @@ browser_window_navigate(struct browser_window *bw,
 	assert(bw);
 	assert(url);
 
-	LOG("bw %p, url %s", bw, nsurl_access(url));
+	NSLOG(netsurf, INFO, "bw %p, url %s", bw, nsurl_access(url));
+
+	/* If we're navigating and we have a history entry and a content
+	 * then update the history entry before we navigate to save our
+	 * current state.  However since history navigation pre-moves
+	 * the history state, we ensure that we only do this if we've not
+	 * been suppressed.  In the suppressed case, the history code
+	 * updates the history itself before navigating.
+	 */
+	if (bw->current_content != NULL &&
+	    bw->history != NULL &&
+	    bw->history->current != NULL &&
+	    !(flags & BW_NAVIGATE_NO_TERMINAL_HISTORY_UPDATE)) {
+		browser_window_history_update(bw, bw->current_content);
+	}
 
 	/* don't allow massively nested framesets */
 	for (cur = bw; cur->parent; cur = cur->parent) {
 		depth++;
 	}
 	if (depth > FRAME_DEPTH) {
-		LOG("frame depth too high.");
+		NSLOG(netsurf, INFO, "frame depth too high.");
 		return NSERROR_FRAME_DEPTH;
 	}
 
@@ -2103,7 +2139,7 @@ browser_window_navigate(struct browser_window *bw,
 	browser_window_remove_caret(bw, false);
 	browser_window_destroy_children(bw);
 
-	LOG("Loading '%s'", nsurl_access(url));
+	NSLOG(netsurf, INFO, "Loading '%s'", nsurl_access(url));
 
 	browser_window_set_status(bw, messages_get("Loading"));
 	bw->history_add = (flags & BW_NAVIGATE_HISTORY);
@@ -2319,7 +2355,8 @@ void browser_window_set_dimensions(struct browser_window *bw,
 		bw->width = width;
 		bw->height = height;
 	} else {
-		LOG("Asked to set dimensions of front end window.");
+		NSLOG(netsurf, INFO,
+		      "Asked to set dimensions of front end window.");
 		assert(0);
 	}
 }
@@ -2349,6 +2386,11 @@ static bool frag_scroll(struct browser_window *bw)
 	rect.x1 = rect.x0;
 	rect.y1 = rect.y0;
 	if (browser_window_set_scroll(bw, &rect) == NSERROR_OK) {
+		if (bw->current_content != NULL &&
+		    bw->history != NULL &&
+		    bw->history->current != NULL) {
+			browser_window_history_update(bw, bw->current_content);
+		}
 		return true;
 	}
 	return false;

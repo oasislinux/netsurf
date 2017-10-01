@@ -112,7 +112,7 @@ static int sEventPipe[2];
 /* exported function defined in beos/gui.h */
 nserror beos_warn_user(const char *warning, const char *detail)
 {
-	LOG("warn_user: %s (%s)", warning, detail);
+	NSLOG(netsurf, INFO, "warn_user: %s (%s)", warning, detail);
 	BAlert *alert;
 	BString text(warning);
 	if (detail)
@@ -354,14 +354,15 @@ static void check_homedir(void)
 
 	if (err < B_OK) {
 		/* we really can't continue without a home directory. */
-		LOG("Can't find user settings directory - nowhere to store state!");
+		NSLOG(netsurf, INFO,
+		      "Can't find user settings directory - nowhere to store state!");
 		die("NetSurf needs to find the user settings directory in order to run.\n");
 	}
 
 	path.Append("NetSurf");
 	err = create_directory(path.Path(), 0644); 
 	if (err < B_OK) {
-		LOG("Unable to create %s", path.Path());
+		NSLOG(netsurf, INFO, "Unable to create %s", path.Path());
 		die("NetSurf could not create its settings directory.\n");
 	}
 }
@@ -387,7 +388,7 @@ static nsurl *gui_get_resource_url(const char *path)
 		path = "favicon.png";
 
 	u << path;
-	LOG("(%s) -> '%s'\n", path, u.String());
+	NSLOG(netsurf, INFO, "(%s) -> '%s'\n", path, u.String());
 	nsurl_create(u.String(), &url);
 	return url;
 }
@@ -588,7 +589,7 @@ static void gui_init(int argc, char** argv)
 		die("Unable to load throbber image.\n");
 
 	find_resource(buf, "Choices", "%/Choices");
-	LOG("Using '%s' as Preferences file", buf);
+	NSLOG(netsurf, INFO, "Using '%s' as Preferences file", buf);
 	options_file_location = strdup(buf);
 	nsoption_read(buf, NULL);
 
@@ -631,12 +632,12 @@ static void gui_init(int argc, char** argv)
 
 	if (nsoption_charp(cookie_file) == NULL) {
 		find_resource(buf, "Cookies", "%/Cookies");
-		LOG("Using '%s' as Cookies file", buf);
+		NSLOG(netsurf, INFO, "Using '%s' as Cookies file", buf);
 		nsoption_set_charp(cookie_file, strdup(buf));
 	}
 	if (nsoption_charp(cookie_jar) == NULL) {
 		find_resource(buf, "Cookies", "%/Cookies");
-		LOG("Using '%s' as Cookie Jar file", buf);
+		NSLOG(netsurf, INFO, "Using '%s' as Cookie Jar file", buf);
 		nsoption_set_charp(cookie_jar, strdup(buf));
 	}
 	if ((nsoption_charp(cookie_file) == NULL) || 
@@ -645,13 +646,13 @@ static void gui_init(int argc, char** argv)
 
 	if (nsoption_charp(url_file) == NULL) {
 		find_resource(buf, "URLs", "%/URLs");
-		LOG("Using '%s' as URL file", buf);
+		NSLOG(netsurf, INFO, "Using '%s' as URL file", buf);
 		nsoption_set_charp(url_file, strdup(buf));
 	}
 
         if (nsoption_charp(ca_path) == NULL) {
                 find_resource(buf, "certs", "/etc/ssl/certs");
-                LOG("Using '%s' as certificate path", buf);
+                NSLOG(netsurf, INFO, "Using '%s' as certificate path", buf);
                 nsoption_set_charp(ca_path, strdup(buf));
         }
 
@@ -763,17 +764,21 @@ void nsbeos_gui_poll(void)
 	timeout.tv_sec = (long)(next_schedule / 1000000LL);
 	timeout.tv_usec = (long)(next_schedule % 1000000LL);
 
-	//LOG("gui_poll: select(%d, ..., %Ldus", max_fd, next_schedule);
+	NSLOG(netsurf, DEEPDEBUG,
+	      "gui_poll: select(%d, ..., %Ldus",
+	      max_fd, next_schedule);
 	fd_count = select(max_fd, &read_fd_set, &write_fd_set, &exc_fd_set, 
 		&timeout);
-	//LOG("select: %d\n", fd_count);
+	NSLOG(netsurf, DEEPDEBUG, "select: %d\n", fd_count);
 
 	if (fd_count > 0 && FD_ISSET(sEventPipe[0], &read_fd_set)) {
 		BMessage *message;
 		int len = read(sEventPipe[0], &message, sizeof(void *));
-		//LOG("gui_poll: BMessage ? %d read", len);
+		NSLOG(netsurf, DEEPDEBUG, "gui_poll: BMessage ? %d read", len);
 		if (len == sizeof(void *)) {
-			//LOG("gui_poll: BMessage.what %-4.4s\n", &(message->what));
+			NSLOG(netsurf, DEEPDEBUG,
+			      "gui_poll: BMessage.what %-4.4s\n",
+			      &(message->what));
 			nsbeos_dispatch_event(message);
 		}
 	}
@@ -1038,7 +1043,7 @@ int main(int argc, char** argv)
 	
 	char path[12];
 	sprintf(path,"%.2s/Messages", getenv("LC_MESSAGES"));
-	LOG("Loading messages from resource %s\n", path);
+	NSLOG(netsurf, INFO, "Loading messages from resource %s\n", path);
 
 	const uint8_t* res = (const uint8_t*)resources.LoadResource('data', path, &size);
 	if (size > 0 && res != NULL) {
@@ -1060,6 +1065,12 @@ int main(int argc, char** argv)
 	}
 
 	netsurf_exit();
+
+	/* finalise options */
+	nsoption_finalise(nsoptions, nsoptions_default);
+
+	/* finalise logging */
+	nslog_finalise();
 
 	return 0;
 }
