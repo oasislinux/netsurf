@@ -109,6 +109,7 @@ struct wlstate {
 
 	struct {
 		int delay, interval;
+		uint32_t code;
 		xkb_keysym_t sym;
 	} repeat;
 
@@ -300,8 +301,6 @@ keyrepeat(void *data)
 {
 	struct platform_window *p = data;
 
-	if (wl->repeat.sym == XKB_KEY_NoSymbol)
-		return;
 	gui_window_key(p->g, wl->repeat.sym, true);
 	tiny_schedule(wl->repeat.interval, keyrepeat, p);
 }
@@ -321,11 +320,12 @@ keyboard_key(void *data, struct wl_keyboard *keyboard, uint32_t serial, uint32_t
 	if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		wl->lastserial = serial;
 		if (xkb_keymap_key_repeats(wl->xkb.map, code)) {
+			wl->repeat.code = code;
 			wl->repeat.sym = sym;
 			tiny_schedule(wl->repeat.delay, keyrepeat, p);
 		}
-	} else if (sym == wl->repeat.sym) {
-		wl->repeat.sym = XKB_KEY_NoSymbol;
+	} else if (code == wl->repeat.code) {
+		tiny_schedule(-1, keyrepeat, p);
 	}
 }
 
