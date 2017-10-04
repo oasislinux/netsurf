@@ -278,17 +278,12 @@ static void
 navigate(struct gui_window *g)
 {
 	struct nsurl *url;
-	char *text;
-	ssize_t len;
+	const char *text;
+	unsigned int len;
 	nserror err;
 
-	len = textarea_get_text(g->url, NULL, 0);
-	if (len == -1)
-		return;
-	text = malloc(len);
+	text = textarea_data(g->url, &len);
 	if (!text)
-		return;
-	if (textarea_get_text(g->url, text, len) == -1)
 		return;
 	if (strchr(text, '.') || text[len - 1] == '/') {
 		err = nsurl_create(text, &url);
