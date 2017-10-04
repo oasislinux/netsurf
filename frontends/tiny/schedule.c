@@ -25,22 +25,12 @@
 static struct callback *schedule_list;
 
 struct callback {
-	int t;
+	struct timespec t;
 	void (*fn)(void *p);
 	void *p;
 
 	struct callback *next;
 };
-
-static int
-now(void)
-{
-	struct timespec ts;
-
-	if (clock_gettime(CLOCK_MONOTONIC, &ts) < 0)
-		return -1;
-	return ts.tv_sec * 1000 + ts.tv_nsec / 1e6;
-}
 
 static void
 schedule_remove(void (*fn)(void *p), void *p)
@@ -58,16 +48,23 @@ schedule_remove(void (*fn)(void *p), void *p)
 }
 
 nserror
-tiny_schedule(int t, void (*fn)(void *p), void *p)
+tiny_schedule(int delay, void (*fn)(void *p), void *p)
 {
+	struct timespec t;
 	struct callback *cb;
 
-	if (t < 0) {
+	if (delay < 0) {
 		schedule_remove(fn, p);
 		return NSERROR_OK;
 	}
-	t += now();
-	// TODO: handle errors
+	if (clock_gettime(CLOCK_MONOTONIC, &t) < 0)
+		return NSERROR_UNKNOWN;
+	t.tv_sec += delay / 1000;
+	t.tv_nsec += (delay % 1000) * 1000000;
+	if (t.tv_nsec >= 1000000000) {
+		t.tv_nsec -= 1000000000;
+		t.tv_sec += 1;
+	}
 	for (cb = schedule_list; cb; cb = cb->next) {
 		if (cb->fn == fn && cb->p == p) {
 			cb->t = t;
@@ -91,20 +88,23 @@ int
 schedule_run(void)
 {
 	struct callback *pending, *cb, **last;
-	int t, left = -1;
+	struct timespec now;
+	int timeout = -1, left;
 
-	t = now();
+	if (clock_gettime(CLOCK_MONOTONIC, &now) < 0)
+		return -1;
 	for (;;) {
 		pending = NULL;
 		for (last = &schedule_list; *last;) {
 			cb = *last;
-			if (cb->t <= t) {
+			if (now.tv_sec > cb->t.tv_sec || now.tv_sec == cb->t.tv_sec && now.tv_nsec >= cb->t.tv_nsec) {
 				*last = cb->next;
 				cb->next = pending;
 				pending = cb;
 			} else {
-				if (left < 0 || cb->t - t < left)
-					left = cb->t - t;
+				left = (cb->t.tv_sec - now.tv_sec) * 1000 + (cb->t.tv_nsec - now.tv_nsec) / 1000000;
+				if (timeout < 0 || left < timeout)
+					timeout = left;
 				last = &cb->next;
 			}
 		}
@@ -118,5 +118,5 @@ schedule_run(void)
 		} while (pending);
 	}
 
-	return left;
+	return timeout;
 }
