@@ -110,6 +110,7 @@ initrespaths(void)
 	nserror err;
 	char *home, *xdgconfighome, buf[PATH_MAX];
 	size_t len;
+	int n;
 
 	xdgconfighome = getenv("XDG_CONFIG_HOME");
 	if (xdgconfighome) {
@@ -128,7 +129,8 @@ initrespaths(void)
 		return err;
 	}
 	confighome[len - 1] = '\0';
-	if (snprintf(buf, sizeof(buf), "%s:${NETSURFRES}:" TINY_RESPATH, confighome) >= sizeof(buf))
+	n = snprintf(buf, sizeof(buf), "%s:${NETSURFRES}:" TINY_RESPATH, confighome);
+	if (n < 0 || n >= sizeof(buf))
 		return NSERROR_NOSPACE;
 	respaths = filepath_path_to_strvec(buf);
 	if (!respaths)
