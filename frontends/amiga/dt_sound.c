@@ -33,7 +33,7 @@
 #include "utils/messages.h"
 #include "netsurf/plotters.h"
 #include "netsurf/content.h"
-#include "render/box.h"
+#include "html/box.h"
 #include "content/llcache.h"
 #include "content/content_protected.h"
 
@@ -195,7 +195,7 @@ bool amiga_dt_sound_redraw(struct content *c,
 		.fill_type = PLOT_OP_TYPE_SOLID,
 		.fill_colour = 0xffffff,
 		.stroke_colour = 0x000000,
-		.stroke_width = 1,
+		.stroke_width = plot_style_int_to_fixed(1),
 	};
 	struct rect rect;
 

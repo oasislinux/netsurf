@@ -1,22 +1,188 @@
 #!/bin/sh
 #
-# NetSurf Library, tool and browser support script
+# NetSurf Library, tool and browser development support script
 #
-# Usage: source env.sh
-# TARGET_ABI / HOST sets the target for library builds
-# TARGET_WORKSPACE is the workspace directory to keep the sandboxes
+# Copyright 2013-2017 Vincent Sanders <vince@netsurf-browser.org>
+# Released under the MIT Licence
 #
 # This script allows NetSurf and its libraries to be built without
 #   requiring installation into a system.
 #
-# Copyright 2013 Vincent Sanders <vince@netsurf-browser.org>
-# Released under the MIT Licence
+# Usage: source env.sh
+#
+# Controlling variables
+#   HOST sets the target architecture for library builds
+#   BUILD sets the building machines architecture
+#   TARGET_WORKSPACE is the workspace directory to keep the sandboxes
+#
+# The use of HOST and BUILD here is directly comprable to the GCC
+#   usage as described at:
+#     http://gcc.gnu.org/onlinedocs/gccint/Configure-Terms.html
+#
 
-# parameters
+###############################################################################
+# OS Package installation
+###############################################################################
+
+# deb packages for dpkg based systems
+NS_DEV_DEB="build-essential pkg-config git gperf libcurl3-dev libpng-dev libjpeg-dev"
+NS_TOOL_DEB="flex bison libhtml-parser-perl"
+if [ "x${NETSURF_GTK_MAJOR}" = "x3" ]; then
+    NS_GTK_DEB="libgtk-3-dev librsvg2-dev"
+else
+    NS_GTK_DEB="libgtk2.0-dev librsvg2-dev"
+fi
+
+# apt get commandline to install necessary dev packages
+ns-apt-get-install()
+{
+    if /usr/bin/apt-cache show libssl1.0-dev >/dev/null 2>&1; then
+        NS_DEV_DEB="${NS_DEV_DEB} libssl1.0-dev"
+    else
+        NS_DEV_DEB="${NS_DEV_DEB} libssl-dev"
+    fi
+    sudo apt-get install $(echo ${NS_DEV_DEB} ${NS_TOOL_DEB} ${NS_GTK_DEB})
+}
+
+
+# packages for yum installer RPM based systems (tested on fedora 20)
+NS_DEV_YUM_RPM="git gcc pkgconfig expat-devel openssl-devel gperf libcurl-devel perl-Digest-MD5-File libjpeg-devel libpng-devel"
+NS_TOOL_YUM_RPM="flex bison"
+if [ "x${NETSURF_GTK_MAJOR}" = "x3" ]; then
+    NS_GTK_YUM_RPM="gtk3-devel librsvg2-devel"
+else
+    NS_GTK_YUM_RPM="gtk2-devel librsvg2-devel"
+fi
+
+# yum commandline to install necessary dev packages
+ns-yum-install()
+{
+    sudo yum -y install $(echo ${NS_DEV_YUM_RPM} ${NS_TOOL_YUM_RPM} ${NS_GTK_YUM_RPM})
+}
+
+
+# packages for dnf installer RPM based systems (tested on fedora 25)
+NS_DEV_DNF_RPM="java-1.8.0-openjdk-headless gcc clang pkgconfig libcurl-devel libjpeg-devel expat-devel libpng-devel openssl-devel gperf perl-HTML-Parser"
+NS_TOOL_DNF_RPM="git flex bison ccache screen"
+if [ "x${NETSURF_GTK_MAJOR}" = "x3" ]; then
+    NS_GTK_DNF_RPM="gtk3-devel"
+else
+    NS_GTK_DNF_RPM="gtk2-devel"
+fi
+
+# dnf commandline to install necessary dev packages
+ns-dnf-install()
+{
+    sudo dnf install $(echo ${NS_DEV_DNF_RPM} ${NS_TOOL_DNF_RPM} ${NS_GTK_DNF_RPM})
+}
+
+
+# packages for zypper installer RPM based systems (tested on openSUSE leap 42)
+NS_DEV_ZYP_RPM="java-1_8_0-openjdk-headless gcc clang pkgconfig libcurl-devel libjpeg-devel libexpat-devel libpng-devel openssl-devel gperf perl-HTML-Parser"
+NS_TOOL_ZYP_RPM="git flex bison gperf ccache screen"
+if [ "x${NETSURF_GTK_MAJOR}" = "x3" ]; then
+    NS_GTK_ZYP_RPM="gtk3-devel"
+else
+    NS_GTK_ZYP_RPM="gtk2-devel"
+fi
+
+# zypper commandline to install necessary dev packages
+ns-zypper-install()
+{
+    sudo zypper install -y $(echo ${NS_DEV_ZYP_RPM} ${NS_TOOL_ZYP_RPM} ${NS_GTK_ZYP_RPM})
+}
+
+
+# Packages for Haiku install
+
+# Haiku secondary arch suffix:
+# empty for primary (gcc2 on x86) or "_x86" for gcc4 secondary.
+HA=_x86
+
+NS_DEV_HPKG="devel:libcurl${HA} devel:libpng${HA} devel:libjpeg${HA} devel:libcrypto${HA} devel:libiconv${HA} devel:libexpat${HA} cmd:pkg_config${HA} cmd:gperf html_parser"
+
+# pkgman commandline to install necessary dev packages
+ns-pkgman-install()
+{
+    pkgman install $(echo ${NS_DEV_HPKG})
+}
+
+
+# MAC OS X
+NS_DEV_MACPORT="git expat openssl curl libjpeg-turbo libpng"
+
+ns-macport-install()
+{
+    PATH=/opt/local/bin:/opt/local/sbin:$PATH sudo /opt/local/bin/port install $(echo ${NS_DEV_MACPORT})
+}
+
+
+# packages for FreeBSD install
+NS_DEV_FREEBSDPKG="gmake curl"
+
+# FreeBSD package install
+ns-freebsdpkg-install()
+{
+    pkg install $(echo ${NS_DEV_FREEBSDPKG})
+}
+
+
+# generic for help text
+NS_DEV_GEN="git, gcc, pkgconfig, expat library, openssl library, libcurl, perl, perl MD5 digest, libjpeg library, libpng library"
+NS_TOOL_GEN="flex tool, bison tool"
+if [ "x${NETSURF_GTK_MAJOR}" = "x3" ]; then
+    NS_GTK_GEN="gtk+ 3 toolkit library, librsvg2 library"
+else
+    NS_GTK_GEN="gtk+ 2 toolkit library, librsvg2 library"
+fi
+
+# Generic OS package install
+#  looks for package managers and tries to use them if present
+ns-package-install()
+{
+    if [ -x "/usr/bin/zypper" ]; then
+        ns-zypper-install
+    elif [ -x "/usr/bin/apt-get" ]; then
+        ns-apt-get-install
+    elif [ -x "/usr/bin/dnf" ]; then
+        ns-dnf-install
+    elif [ -x "/usr/bin/yum" ]; then
+        ns-yum-install
+    elif [ -x "/bin/pkgman" ]; then
+        ns-pkgman-install
+    elif [ -x "/opt/local/bin/port" ]; then
+        ns-macport-install
+    elif [ -x "/usr/sbin/pkg" ]; then
+        ns-freebsdpkg-install
+    else
+        echo "Unable to determine OS packaging system in use."
+        echo "Please ensure development packages are installed for:"
+        echo ${NS_DEV_GEN}"," ${NS_TOOL_GEN}"," ${NS_GTK_GEN}
+    fi
+}
+
+###############################################################################
+# Setup environment
+###############################################################################
+
+# find which command used to find everything else on path
+if [ -x /usr/bin/which ]; then
+    WHICH_CMD=/usr/bin/which
+else
+    WHICH_CMD=/bin/which
+fi
+
+# environment parameters
 
 # The system doing the building
 if [ "x${BUILD}" = "x" ]; then
-    BUILD=$(cc -dumpmachine)
+    BUILD_CC=$(${WHICH_CMD} cc)
+    if [ $? -eq 0 ];then
+        BUILD=$(cc -dumpmachine)
+    else
+       echo "Unable to locate a compiler. Perhaps run ns-package-install"
+       return 1
+    fi
 fi
 
 # Get the host build if unset
@@ -29,7 +195,7 @@ if [ "x${HOST}" = "x" ]; then
 else
     HOST_CC_LIST="${HOST}-cc ${HOST}-gcc /opt/netsurf/${HOST}/cross/bin/${HOST}-cc /opt/netsurf/${HOST}/cross/bin/${HOST}-gcc"
     for HOST_CC_V in $(echo ${HOST_CC_LIST});do
-        HOST_CC=$(/bin/which ${HOST_CC_V})
+        HOST_CC=$(${WHICH_CMD} ${HOST_CC_V})
         if [ "x${HOST_CC}" != "x" ];then
             break
         fi
@@ -48,10 +214,12 @@ else
     unset HOST_CC_LIST HOST_CC_V HOST_CC HOST_CC_MACHINE
 fi
 
+# set up a default target workspace
 if [ "x${TARGET_WORKSPACE}" = "x" ]; then
     TARGET_WORKSPACE=${HOME}/dev-netsurf/workspace
 fi
 
+# set up default parallelism
 if [ "x${USE_CPUS}" = "x" ]; then
     NCPUS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || getconf NPROCESSORS_ONLN 2>/dev/null)
     NCPUS="${NCPUS:-1}"
@@ -64,20 +232,17 @@ if [ "x${NETSURF_GTK_MAJOR}" = "x" ]; then
     NETSURF_GTK_MAJOR=2
 fi
 
-
-###############################################################################
-# Setup environment
-###############################################################################
-
+# report to user
 echo "BUILD=${BUILD}"
 echo "HOST=${HOST}"
 echo "TARGET_WORKSPACE=${TARGET_WORKSPACE}"
 echo "USE_CPUS=${USE_CPUS}"
 
 export PREFIX=${TARGET_WORKSPACE}/inst-${HOST}
+export BUILD_PREFIX=${TARGET_WORKSPACE}/inst-${BUILD}
 export PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH}::
 export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${PREFIX}/lib
-export PATH=${PATH}:${PREFIX}/bin
+export PATH=${PATH}:${BUILD_PREFIX}/bin
 export NETSURF_GTK_MAJOR
 
 # make tool
@@ -152,117 +317,6 @@ esac
 
 export MAKE
 
-################ OS Package installation ################
-
-# deb packages for dpkg based systems
-NS_DEV_DEB="build-essential pkg-config git gperf libcurl3-dev libssl-dev libpng-dev libjpeg-dev"
-NS_TOOL_DEB="flex bison libhtml-parser-perl"
-if [ "x${NETSURF_GTK_MAJOR}" = "x3" ]; then
-    NS_GTK_DEB="libgtk-3-dev librsvg2-dev"
-else
-    NS_GTK_DEB="libgtk2.0-dev librsvg2-dev"
-fi
-
-# apt get commandline to install necessary dev packages
-ns-apt-get-install()
-{
-    sudo apt-get install $(echo ${NS_DEV_DEB} ${NS_TOOL_DEB} ${NS_GTK_DEB})
-}
-
-# RPM packages for rpm based systems (tested on fedora 20)
-NS_DEV_RPM="git gcc pkgconfig libexpat-devel openssl-devel libcurl-devel perl-Digest-MD5-File libjpeg-devel libpng-devel"
-NS_TOOL_RPM="flex bison"
-if [ "x${NETSURF_GTK_MAJOR}" = "x3" ]; then
-    NS_GTK_RPM="gtk3-devel librsvg2-devel"
-else
-    NS_GTK_RPM="gtk2-devel librsvg2-devel"
-fi
-
-# yum commandline to install necessary dev packages
-ns-yum-install()
-{
-    sudo yum -y install $(echo ${NS_DEV_RPM} ${NS_TOOL_RPM} ${NS_GTK_RPM})
-}
-
-
-# DNF RPM packages for rpm based systems (tested on fedora 25)
-NS_DEV_DNF_RPM="java-1.8.0-openjdk-headless gcc clang pkgconfig libcurl-devel libjpeg-devel expat-devel libpng-devel openssl-devel gperf perl-HTML-Parser"
-NS_TOOL_DNF_RPM="git flex bison ccache screen"
-if [ "x${NETSURF_GTK_MAJOR}" = "x3" ]; then
-    NS_GTK_DNF_RPM="gtk3-devel"
-else
-    NS_GTK_DNF_RPM="gtk2-devel"
-fi
-
-# dnf commandline to install necessary dev packages
-ns-dnf-install()
-{
-    sudo dnf install $(echo ${NS_DEV_DNF_RPM} ${NS_TOOL_DNF_RPM} ${NS_GTK_DNF_RPM})
-}
-
-
-
-# Haiku secondary arch suffix:
-# empty for primary (gcc2 on x86),
-# "_x86" for gcc4 secondary.
-HA=_x86
-# Haiku packages
-NS_DEV_HPKG="devel:libcurl${HA} devel:libpng${HA} devel:libjpeg${HA} devel:libcrypto${HA} devel:libiconv${HA} devel:libexpat${HA} cmd:pkg_config${HA} cmd:gperf html_parser"
-
-# pkgman commandline to install necessary dev packages
-ns-pkgman-install()
-{
-    pkgman install $(echo ${NS_DEV_HPKG})
-}
-
-# MAC OS X
-NS_DEV_MACPORT="git expat openssl curl libjpeg-turbo libpng"
-
-ns-macport-install()
-{
-    PATH=/opt/local/bin:/opt/local/sbin:$PATH sudo /opt/local/bin/port install $(echo ${NS_DEV_MACPORT})
-}
-
-NS_DEV_FREEBSDPKG="gmake curl"
-
-# FreeBSD package install
-ns-freebsdpkg-install()
-{
-    pkg install $(echo ${NS_DEV_FREEBSDPKG})
-}
-
-# generic for help text
-NS_DEV_GEN="git, gcc, pkgconfig, expat library, openssl library, libcurl, perl, perl MD5 digest, libjpeg library, libpng library"
-NS_TOOL_GEN="flex tool, bison tool"
-if [ "x${NETSURF_GTK_MAJOR}" = "x3" ]; then
-    NS_GTK_GEN="gtk+ 3 toolkit library, librsvg2 library"
-else
-    NS_GTK_GEN="gtk+ 2 toolkit library, librsvg2 library"
-fi
-
-# Genertic OS package install
-#  looks for package managers and tries to use them if present
-ns-package-install()
-{
-    if [ -x "/usr/bin/apt-get" ]; then
-        ns-apt-get-install
-    elif [ -x "/usr/bin/dnf" ]; then
-        ns-dnf-install
-    elif [ -x "/usr/bin/yum" ]; then
-        ns-yum-install
-    elif [ -x "/bin/pkgman" ]; then
-        ns-pkgman-install
-    elif [ -x "/opt/local/bin/port" ]; then
-        ns-macport-install
-    elif [ -x "/usr/sbin/pkg" ]; then
-        ns-freebsdpkg-install
-    else
-        echo "Unable to determine OS packaging system in use."
-        echo "Please ensure development packages are installed for:"
-        echo ${NS_DEV_GEN}"," ${NS_TOOL_GEN}"," ${NS_GTK_GEN}
-    fi
-}
-
 ################ Development helpers ################
 
 # git pull in all repos parameters are passed to git pull
@@ -300,17 +354,21 @@ ns-clone()
 # issues a make command to all libraries
 ns-make-libs()
 {
-    for REPO in $(echo ${NS_BUILDSYSTEM} ${NS_TOOLS}); do
+    for REPO in $(echo ${NS_BUILDSYSTEM} ${NS_INTERNAL_LIBS} ${NS_FRONTEND_LIBS}); do
         echo "    MAKE: make -C ${REPO} $USE_CPUS $*"
-        ${MAKE} -C ${TARGET_WORKSPACE}/${REPO} $USE_CPUS $*
+        ${MAKE} -C ${TARGET_WORKSPACE}/${REPO} HOST=${HOST} $USE_CPUS $*
         if [ $? -ne 0 ]; then
             return $?
         fi
     done
+}
 
-    for REPO in $(echo ${NS_INTERNAL_LIBS} ${NS_FRONTEND_LIBS}); do
+# issues make command for all tools
+ns-make-tools()
+{
+    for REPO in $(echo ${NS_BUILDSYSTEM} ${NS_TOOLS}); do
         echo "    MAKE: make -C ${REPO} $USE_CPUS $*"
-        ${MAKE} -C ${TARGET_WORKSPACE}/${REPO} HOST=${HOST} $USE_CPUS $*
+        ${MAKE} -C ${TARGET_WORKSPACE}/${REPO} PREFIX=${BUILD_PREFIX} HOST=${BUILD} $USE_CPUS $*
         if [ $? -ne 0 ]; then
             return $?
         fi
@@ -329,6 +387,7 @@ ns-pull-install()
 {
     ns-pull $*
 
+    ns-make-tools install
     ns-make-libs install
 }
 

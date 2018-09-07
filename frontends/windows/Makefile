@@ -15,7 +15,7 @@ $(eval $(call pkg_config_find_and_add,libcares,Cares))
 $(eval $(call pkg_config_find_and_add,zlib,ZLib))
 
 # libraries for windows API
-LDFLAGS += -lgnurx -lgdi32 -lcomctl32 -lws2_32 -lmsimg32 -lshlwapi -mwindows
+LDFLAGS += -lgnurx -lgdi32 -lcomctl32 -lws2_32 -lmsimg32 -lshlwapi -lcrypt32 -mwindows
 
 CFLAGS += -U__STRICT_ANSI__ -mwin32
 # only windows versions after XP are supported
@@ -33,11 +33,15 @@ WSCFLAGS := -std=c99 -Dnswin32 -DCURL_STATICLIB -DCARES_STATICLIB -g
 CFLAGS += $(WSCFLAGS)
 LDFLAGS += $(WSCFLAGS)
 
+# The filter and target for split messages
+MESSAGES_FILTER=win
+MESSAGES_TARGET=$(FRONTEND_RESOURCES_DIR)
+
 # ----------------------------------------------------------------------------
 # built-in resource setup
 # ----------------------------------------------------------------------------
 
-$(OBJROOT)/windows_resource.o: $(FRONTEND_RESOURCES_DIR)/resource.rc
+$(OBJROOT)/windows_resource.o: $(FRONTEND_RESOURCES_DIR)/resource.rc $(addsuffix /Messages,$(addprefix $(MESSAGES_TARGET)/,$(MESSAGES_LANGUAGES)))
 	$(VQ)echo " WINDRES: compiling windows resources"
 	${Q}$(WINDRES) $< -O coff -o $@
 
@@ -49,8 +53,8 @@ S_RESOURCES := windows_resource.o
 
 # sources purely for the windows build
 S_FRONTEND := main.c window.c gui.c drawable.c plot.c findfile.c	\
-	  font.c bitmap.c about.c prefs.c download.c filetype.c file.c	\
-	  local_history.c schedule.c windbg.c pointers.c \
+	  font.c bitmap.c about.c prefs.c download.c fetch.c file.c	\
+	  local_history.c schedule.c windbg.c pointers.c login.c \
 	  corewindow.c hotlist.c cookies.c global_history.c ssl_cert.c
 
 # This is the final source build list
@@ -84,6 +88,7 @@ endif
 # installer messages generation
 $(OBJROOT)/messages-en: resources/FatMessages
 	$(VQ)echo "MSGSPLIT: Language: en Filter: win"
+	$(Q)$(RM) $@
 	$(Q)$(SPLIT_MESSAGES) -l en -p win -f messages -o $@ $<
 
 netsurf-installer.exe: $(EXETARGET) $(WIN_RES_INS_OBJ)

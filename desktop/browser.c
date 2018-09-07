@@ -56,9 +56,9 @@
 #include "content/hlcache.h"
 #include "content/urldb.h"
 #include "css/utils.h"
-#include "render/form_internal.h"
-#include "render/html.h"
-#include "render/box.h"
+#include "html/form_internal.h"
+#include "html/html.h"
+#include "html/box.h"
 #include "javascript/js.h"
 
 #include "desktop/browser_history.h"
@@ -1405,6 +1405,10 @@ browser_window_callback(hlcache_handle *c,
 		bw->current_content = c;
 		bw->loading_content = NULL;
 
+		/* Format the new content to the correct dimensions */
+		browser_window_get_dimensions(bw, &width, &height, true);
+		content_reformat(c, false, width, height);
+
 		/* history */
 		if (bw->history_add && bw->history) {
 			nsurl *url = hlcache_handle_get_url(c);
@@ -1437,13 +1441,13 @@ browser_window_callback(hlcache_handle *c,
 			 * all newly visited URLs.  With the history_add call
 			 * after, we only leak the thumbnails when urldb does
 			 * not add the URL.
+			 *
+			 * Also, since browser_window_history_add can create
+			 * a thumbnail (content_redraw), we need to do it after
+			 * content_reformat.
 			 */
 			browser_window_history_add(bw, c, bw->frag_id);
 		}
-
-		/* Format the new content to the correct dimensions */
-		browser_window_get_dimensions(bw, &width, &height, true);
-		content_reformat(c, false, width, height);
 
 		browser_window_remove_caret(bw, false);
 
@@ -2221,7 +2225,7 @@ nserror browser_window_navigate_up(struct browser_window *bw, bool new_window)
 	if (bw == NULL)
 		return NSERROR_BAD_PARAMETER;
 
-	current = browser_window_get_url(bw);
+	current = browser_window_access_url(bw);
 
 	err = nsurl_parent(current, &parent);
 	if (err != NSERROR_OK) {
@@ -2247,8 +2251,8 @@ nserror browser_window_navigate_up(struct browser_window *bw, bool new_window)
 }
 
 
-/* Exported interface, documented in browser.h */
-nsurl* browser_window_get_url(struct browser_window *bw)
+/* Exported interface, documented in include/netsurf/browser_window.h */
+nsurl* browser_window_access_url(struct browser_window *bw)
 {
 	assert(bw != NULL);
 
@@ -2261,6 +2265,36 @@ nsurl* browser_window_get_url(struct browser_window *bw)
 	}
 
 	return corestring_nsurl_about_blank;
+}
+
+/* Exported interface, documented in include/netsurf/browser_window.h */
+nserror browser_window_get_url(
+		struct browser_window *bw,
+		bool fragment,
+		nsurl** url_out)
+{
+	nserror err;
+	nsurl *url;
+
+	assert(bw != NULL);
+
+	if (!fragment || bw->frag_id == NULL || bw->loading_content != NULL) {
+		/* If there's a loading content, then the bw->frag_id will have
+		 * been trampled, possibly with a new frag_id, but we will
+		 * still be returning the current URL, so in this edge case
+		 * we just drop any fragment. */
+		url = nsurl_ref(browser_window_access_url(bw));
+
+	} else {
+		err = nsurl_refragment(browser_window_access_url(bw),
+				bw->frag_id, &url);
+		if (err != NSERROR_OK) {
+			return err;
+		}
+	}
+
+	*url_out = url;
+	return NSERROR_OK;
 }
 
 /* Exported interface, documented in browser.h */

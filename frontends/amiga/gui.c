@@ -4059,10 +4059,12 @@ gui_window_create(struct browser_window *bw,
 		ULONG addtabclosegadget = TAG_IGNORE;
 		ULONG iconifygadget = FALSE;
 
+#ifdef __amigaos4__
 		if (nsoption_charp(pubscreen_name) && 
 		    (locked_screen == TRUE) &&
 		    (strcmp(nsoption_charp(pubscreen_name), "Workbench") == 0))
 				iconifygadget = TRUE;
+#endif
 
 		NSLOG(netsurf, INFO, "Creating menu");
 		struct Menu *menu = ami_gui_menu_create(g->shared);
@@ -4965,22 +4967,20 @@ void ami_get_hscroll_pos(struct gui_window_2 *gwin, ULONG *xs)
 	if(gwin->objects[GID_HSCROLL])
 	{
 		GetAttr(SCROLLER_Top, (Object *)gwin->objects[GID_HSCROLL], xs);
+		*xs /= gwin->gw->scale;
 	} else {
 		*xs = 0;
 	}
-
-	*xs /= gwin->gw->scale;
 }
 
 void ami_get_vscroll_pos(struct gui_window_2 *gwin, ULONG *ys)
 {
 	if(gwin->objects[GID_VSCROLL]) {
 		GetAttr(SCROLLER_Top, gwin->objects[GID_VSCROLL], ys);
+		*ys /= gwin->gw->scale;
 	} else {
 		*ys = 0;
 	}
-
-	*ys /= gwin->gw->scale;
 }
 
 static bool gui_window_get_scroll(struct gui_window *g, int *restrict sx, int *restrict sy)

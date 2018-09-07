@@ -142,7 +142,11 @@ char *filepath_find(char **respathv, const char *filename)
 }
 
 /* exported interface documented in filepath.h */
-char *filepath_sfinddef(char **respathv, char *filepath, const char *filename, const char *def)
+char *
+filepath_sfinddef(char **respathv,
+		  char *filepath,
+		  const char *filename,
+		  const char *def)
 {
 	char t[PATH_MAX];
 	char *ret;
@@ -161,7 +165,7 @@ char *filepath_sfinddef(char **respathv, char *filepath, const char *filename, c
 			snprintf(t, PATH_MAX, "%s/%s", def, filename);
 		}		
 		if (realpath(t, ret) == NULL) {
-			strcpy(ret, t);
+			strncpy(ret, t, PATH_MAX);
 		}
 
 	}

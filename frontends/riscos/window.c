@@ -583,7 +583,7 @@ static void ro_gui_window_action_add_bookmark(struct gui_window *g)
 			browser_window_has_content(g->bw) == false)
 		return;
 
-	url = browser_window_get_url(g->bw);
+	url = browser_window_access_url(g->bw);
 
 	ro_gui_hotlist_add_page(url);
 	ro_toolbar_update_hotlist(g->toolbar);
@@ -603,7 +603,7 @@ static void ro_gui_window_action_remove_bookmark(struct gui_window *g)
 			browser_window_has_content(g->bw) == false)
 		return;
 
-	url = browser_window_get_url(g->bw);
+	url = browser_window_access_url(g->bw);
 
 	ro_gui_hotlist_remove_page(url);
 }
@@ -830,6 +830,8 @@ ro_gui_window_toolbar_click(void *data,
 		case TOOLBAR_URL_DRAG_URL:
 		{
 			gui_save_type save_type;
+			nserror err;
+			nsurl *url;
 
 			if (!browser_window_has_content(g->bw))
 				break;
@@ -839,9 +841,17 @@ ro_gui_window_toolbar_click(void *data,
 			else
 				save_type = GUI_SAVE_LINK_TEXT;
 
-			ro_gui_drag_save_link(save_type,
-					browser_window_get_url(g->bw),
+			err = browser_window_get_url(g->bw, true, &url);
+			if (err != NSERROR_OK) {
+				/* Fall back to access (won't get fragment). */
+				url = nsurl_ref(
+					browser_window_access_url(g->bw));
+			}
+
+			ro_gui_drag_save_link(save_type, url,
 					browser_window_get_title(g->bw), g);
+
+			nsurl_unref(url);
 		}
 			break;
 
@@ -1009,7 +1019,7 @@ static void ro_gui_window_action_new_window(struct gui_window *g)
 		return;
 
 	error = browser_window_create(BW_CREATE_CLONE,
-			browser_window_get_url(g->bw),
+			browser_window_access_url(g->bw),
 			NULL, g->bw, NULL);
 
 	if (error != NSERROR_OK) {
@@ -1552,7 +1562,7 @@ static void ro_gui_window_close(wimp_w w)
 	if (pointer.buttons & wimp_CLICK_ADJUST) {
 		destroy = !ro_gui_shift_pressed();
 
-		url = browser_window_get_url(g->bw);
+		url = browser_window_access_url(g->bw);
 		if (url != NULL) {
 			netsurf_nsurl_to_path(url, &filename);
 		}
@@ -2671,7 +2681,7 @@ ro_gui_window_menu_select(wimp_w w,
 			error = browser_window_navigate(
 				bw,
 				current_menu_url,
-				browser_window_get_url(bw),
+				browser_window_access_url(bw),
 				BW_NAVIGATE_DOWNLOAD,
 				NULL,
 				NULL,
@@ -2684,7 +2694,7 @@ ro_gui_window_menu_select(wimp_w w,
 			error = browser_window_create(
 				BW_CREATE_HISTORY | BW_CREATE_CLONE,
 				current_menu_url,
-				browser_window_get_url(bw),
+				browser_window_access_url(bw),
 				bw,
 				NULL);
 		}

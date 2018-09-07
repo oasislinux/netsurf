@@ -216,6 +216,17 @@ GtkWidget *nsgtk_button_new_from_stock(const gchar *stock_id)
 }
 
 /* exported interface documented in gtk/compat.h */
+void nsgtk_button_set_focus_on_click(GtkButton *button, gboolean focus_on_click)
+{
+#if GTK_CHECK_VERSION(3,20,0)
+	gtk_widget_set_focus_on_click(GTK_WIDGET(button), focus_on_click);
+#else
+	gtk_button_set_focus_on_click(button, focus_on_click);
+#endif
+}
+
+
+/* exported interface documented in gtk/compat.h */
 gboolean nsgtk_stock_lookup(const gchar *stock_id, GtkStockItem *item)
 {
 #ifdef NSGTK_USE_ICON_NAME
@@ -234,12 +245,17 @@ void nsgtk_widget_override_background_color(GtkWidget *widget,
 					    uint16_t b)
 {
 #if GTK_CHECK_VERSION(3,0,0)
+#if GTK_CHECK_VERSION(3,16,0)
+	/* do nothing - deprecated - must use css styling */
+	return;
+#else
 	GdkRGBA colour;
 	colour.alpha = (double)a / 0xffff;
 	colour.red = (double)r / 0xffff;
 	colour.green = (double)g / 0xffff;
 	colour.blue = (double)b / 0xffff;
 	gtk_widget_override_background_color(widget, state, &colour);
+#endif
 #else
 	GdkColor colour;
 	colour.pixel = a;
@@ -403,15 +419,25 @@ GtkWidget *nsgtk_dialog_get_content_area(GtkDialog *dialog)
 #endif
 }
 
+#if GTK_CHECK_VERSION(3,22,0)
+#include "gtk/scaffolding.h"
+#endif
+
 gboolean nsgtk_show_uri(GdkScreen *screen,
 			const gchar *uri,
 			guint32 timestamp,
 			GError **error)
 {
 #if GTK_CHECK_VERSION(2,14,0)
-	return gtk_show_uri(screen, uri, timestamp, error);
+#if GTK_CHECK_VERSION(3,22,0)
+	GtkWindow *parent;
+	parent = nsgtk_scaffolding_window(nsgtk_current_scaffolding());
+	return gtk_show_uri_on_window(parent, uri, timestamp,error);
 #else
-	return FALSE; /* FIXME */
+	return gtk_show_uri(screen, uri, timestamp, error);
+#endif
+#else
+	return FALSE; /** \todo add uri opening for before gtk 2.14 */
 #endif
 }
 
@@ -528,6 +554,17 @@ void nsgtk_image_menu_item_set_image(GtkWidget *image_menu_item, GtkWidget *imag
 {
 #if !GTK_CHECK_VERSION(3,10,0)
 	gtk_image_menu_item_set_image(GTK_IMAGE_MENU_ITEM(image_menu_item), image);
+#endif
+}
+
+/* exported interface documented in gtk/compat.h */
+void nsgtk_menu_popup_at_pointer(GtkMenu *menu, const GdkEvent *trigger_event)
+{
+#if GTK_CHECK_VERSION(3,22,0)
+	gtk_menu_popup_at_pointer(menu, trigger_event);
+#else
+	gtk_menu_popup(menu, NULL, NULL, NULL, NULL, 0,
+		       gtk_get_current_event_time());
 #endif
 }
 

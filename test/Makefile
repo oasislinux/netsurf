@@ -25,6 +25,8 @@ nsurl_SRCS := $(NSURL_SOURCES) utils/corestrings.c test/log.c test/nsurl.c
 urldbtest_SRCS := $(NSURL_SOURCES) \
 	utils/bloom.c utils/nsoption.c utils/corestrings.c utils/time.c	\
 	utils/hashtable.c utils/messages.c utils/utils.c \
+	utils/http/primitives.c utils/http/generics.c \
+	utils/http/strict-transport-security.c \
 	content/urldb.c \
 	test/log.c test/urldbtest.c
 
@@ -139,6 +141,7 @@ BASE_TESTCFLAGS := -std=c99 -g \
 	-D_XOPEN_SOURCE=600 \
 	-Itest -Iinclude -Icontent/handlers -Ifrontends -I. -I.. \
 	-Dnsgtk \
+	$(SAN_FLAGS) \
 	$(shell pkg-config --cflags libcurl libparserutils libwapcaplet libdom libnsutils libutf8proc) \
 	$(LIB_CFLAGS)
 TESTCFLAGS := $(BASE_TESTCFLAGS) \
@@ -147,6 +150,7 @@ TESTCFLAGS := $(BASE_TESTCFLAGS) \
 
 TESTLDFLAGS := -L$(TESTROOT) \
 	$(shell pkg-config --libs libcurl libparserutils libwapcaplet libdom libnsutils libutf8proc) -lz \
+	$(SAN_FLAGS) \
 	$(LIB_LDFLAGS)\
 	$(COV_LDFLAGS)
 
@@ -200,11 +204,12 @@ $(eval $(foreach SOURCE,$(sort $(filter %.c,$(NOCOV_TESTSOURCES))), \
 	$(call compile_test_nocov_target_c,$(SOURCE),$(subst /,_,$(SOURCE:.c=.o)),$(subst /,_,$(SOURCE:.c=.d)))))
 
 
-.PHONY:test coverage
+.PHONY:test coverage sanitize
 
 test: $(TESTROOT)/created $(TESTROOT)/libmalloc_fig.so $(addsuffix _test,$(TESTS))
 
 coverage: test
+sanitize: test
 
 $(TESTROOT)/created:
 	$(VQ)echo "   MKDIR: $(TESTROOT)"

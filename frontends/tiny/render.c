@@ -798,7 +798,7 @@ plot_line(const struct redraw_context *ctx, const plot_style_t *style, const str
 	y0 = r->y0;
 	x1 = r->x1;
 	y1 = r->y1;
-	sw = max(style->stroke_width, 1);
+	sw = max(plot_style_fixed_to_int(style->stroke_width), 1);
 
 	// TODO: handled non-solid lines
 

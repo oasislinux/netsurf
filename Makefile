@@ -130,7 +130,7 @@ MESSAGES_FILTER=any
 # The languages in the fat messages to convert
 MESSAGES_LANGUAGES=de en fr it nl
 # The target directory for the split messages
-MESSAGES_TARGET=!NetSurf/Resources
+MESSAGES_TARGET=resources
 
 # Defaults for tools
 PERL=perl
@@ -575,6 +575,25 @@ CXXFLAGS += -DNETSURF_HOMEPAGE=\"$(NETSURF_HOMEPAGE)\"
 CFLAGS += -DNETSURF_LOG_LEVEL=$(NETSURF_LOG_LEVEL)
 CXXFLAGS += -DNETSURF_LOG_LEVEL=$(NETSURF_LOG_LEVEL)
 
+# If we're building the sanitize goal, override things
+ifneq ($(filter-out sanitize,$(MAKECMDGOALS)),$(MAKECMDGOALS))
+override NETSURF_USE_SANITIZER := YES
+override NETSURF_RECOVER_SANITIZERS := NO
+endif
+
+# If we're going to use the sanitizer set it up
+ifeq ($(NETSURF_USE_SANITIZER),YES)
+SAN_FLAGS := -fsanitize=address -fsanitize=undefined
+ifeq ($(NETSURF_RECOVER_SANITIZERS),NO)
+SAN_FLAGS += -fno-sanitize-recover
+endif
+else
+SAN_FLAGS :=
+endif
+CFLAGS += $(SAN_FLAGS)
+CXXFLAGS += $(SAN_FLAGS)
+LDFLAGS += $(SAN_FLAGS)
+
 # and the logging filter
 CFLAGS += -DNETSURF_BUILTIN_LOG_FILTER=\"$(NETSURF_BUILTIN_LOG_FILTER)\"
 CXXFLAGS += -DNETSURF_BUILTIN_LOG_FILTER=\"$(NETSURF_BUILTIN_LOG_FILTER)\"
@@ -617,9 +636,6 @@ include frontends/Makefile
 # Content sources
 include content/Makefile
 
-# render sources
-include render/Makefile
-
 # utility sources
 include utils/Makefile
 
@@ -636,7 +652,6 @@ include desktop/Makefile
 S_COMMON := \
 	$(S_CONTENT) \
 	$(S_FETCHERS) \
-	$(S_RENDER) \
 	$(S_UTILS) \
 	$(S_HTTP) \
 	$(S_NSURL) \
@@ -651,16 +666,12 @@ S_COMMON := \
 # Message splitting rule generation macro
 # 1 = Language
 define split_messages
-.INTERMEDIATE:$$(MESSAGES_TARGET)/$(1)/Messages.tmp
 
-$$(MESSAGES_TARGET)/$(1)/Messages.tmp: resources/FatMessages
+$$(MESSAGES_TARGET)/$(1)/Messages: resources/FatMessages
 	$$(VQ)echo "MSGSPLIT: Language: $(1) Filter: $$(MESSAGES_FILTER)"
 	$$(Q)$$(MKDIR) -p $$(MESSAGES_TARGET)/$(1)
-	$$(Q)$$(SPLIT_MESSAGES) -l $(1) -p $$(MESSAGES_FILTER) -f messages -o $$@ $$<
-
-$$(MESSAGES_TARGET)/$(1)/Messages: $$(MESSAGES_TARGET)/$(1)/Messages.tmp
-	$$(VQ)echo "COMPRESS: $$@"
-	$$(Q)gzip -9n < $$< > $$@
+	$$(Q)$$(RM) $$@
+	$$(Q)$$(SPLIT_MESSAGES) -l $(1) -p $$(MESSAGES_FILTER) -f messages -o $$@ -z $$<
 
 CLEAN_MESSAGES += $$(MESSAGES_TARGET)/$(1)/Messages
 MESSAGES += $$(MESSAGES_TARGET)/$(1)/Messages
@@ -752,7 +763,6 @@ DEPFILES :=
 # 3 = obj filename, no prefix
 define dependency_generate_c
 DEPFILES += $(2)
-$$(DEPROOT)/$(2): $$(DEPROOT)/created $(1) Makefile.config
 
 endef
 
@@ -761,7 +771,6 @@ endef
 # 3 = obj filename, no prefix
 define dependency_generate_s
 DEPFILES += $(2)
-$$(DEPROOT)/$(2): $$(DEPROOT)/created $(1)
 
 endef
 
@@ -771,7 +780,7 @@ endef
 ifeq ($(CC_MAJOR),2)
 # simpler deps tracking for gcc2...
 define compile_target_c
-$$(DEPROOT)/$(3) $$(OBJROOT)/$(2): $$(OBJROOT)/created
+$$(OBJROOT)/$(2): $(1) $$(OBJROOT)/created $$(DEPROOT)/created
 	$$(VQ)echo "     DEP: $(1)"
 	$$(Q)$$(RM) $$(DEPROOT)/$(3)
 	$$(Q)$$(CC) $$(IFLAGS) $$(CFLAGS) -MM  \
@@ -784,7 +793,7 @@ $$(DEPROOT)/$(3) $$(OBJROOT)/$(2): $$(OBJROOT)/created
 endef
 else
 define compile_target_c
-$$(DEPROOT)/$(3) $$(OBJROOT)/$(2): $$(OBJROOT)/created
+$$(OBJROOT)/$(2): $(1) $$(OBJROOT)/created $$(DEPROOT)/created
 	$$(VQ)echo " COMPILE: $(1)"
 	$$(Q)$$(RM) $$(DEPROOT)/$(3)
 	$$(Q)$$(RM) $$(OBJROOT)/$(2)
@@ -796,7 +805,7 @@ endef
 endif
 
 define compile_target_cpp
-$$(DEPROOT)/$(3) $$(OBJROOT)/$(2): $$(OBJROOT)/created
+$$(OBJROOT)/$(2): $(1) $$(OBJROOT)/created $$(DEPROOT)/created
 	$$(VQ)echo "     DEP: $(1)"
 	$$(Q)$$(RM) $$(DEPROOT)/$(3)
 	$$(Q)$$(CC) $$(IFLAGS) $$(CXXFLAGS) $$(COMMON_WARNFLAGS) $$(CXXWARNFLAGS) -MM  \
@@ -812,7 +821,7 @@ endef
 # 2 = obj filename, no prefix
 # 3 = dep filename, no prefix
 define compile_target_s
-$$(DEPROOT)/$(3) $$(OBJROOT)/$(2): $$(OBJROOT)/created
+$$(OBJROOT)/$(2): $(1) $$(OBJROOT)/created $$(DEPROOT)/created
 	$$(VQ)echo "ASSEMBLE: $(1)"
 	$$(Q)$$(RM) $$(DEPROOT)/$(3)
 	$$(Q)$$(RM) $$(OBJROOT)/$(2)

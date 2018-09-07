@@ -1237,7 +1237,6 @@ gui_window_get_dimensions(struct gui_window *gw,
 		*width /= scale;
 		*height /= scale;
 	}
-	NSLOG(netsurf, INFO, "gw:%p width:%i height:%i", gw, *width, *height);
 
 	return NSERROR_OK;
 }
@@ -1295,9 +1294,7 @@ static void gui_window_create_form_select_menu(struct gui_window *g,
 
 	gtk_widget_show_all(select_menu);
 
-	gtk_menu_popup(GTK_MENU(select_menu), NULL, NULL, NULL,
-			NULL /* data */, 0, gtk_get_current_event_time());
-
+	nsgtk_menu_popup_at_pointer(GTK_MENU(select_menu), NULL);
 }
 
 static void

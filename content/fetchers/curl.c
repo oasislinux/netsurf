@@ -67,6 +67,21 @@
 /** maximum number of X509 certificates in chain for TLS connection */
 #define MAX_CERTS 10
 
+/* the ciphersuites we are willing to use */
+#define CIPHER_LIST						\
+	/* disable everything */				\
+	"-ALL:"							\
+	/* enable TLSv1.2 PFS suites */				\
+	"EECDH+AES+TLSv1.2:EDH+AES+TLSv1.2:"			\
+	/* enable PFS AES GCM suites */				\
+	"EECDH+AESGCM:EDH+AESGCM:"				\
+	/* Enable PFS AES CBC suites */				\
+	"EECDH+AES:EDH+AES:"					\
+	/* Enable non-PFS fallback suite */			\
+	"AES128-SHA:"						\
+	/* Remove any PFS suites using weak DSA key exchange */	\
+	"-DSS"
+
 /** SSL certificate info */
 struct cert_info {
 	X509 *cert;		/**< Pointer to certificate */
@@ -555,9 +570,15 @@ fetch_curl_sslctxfun(CURL *curl_handle, void *_sslctx, void *parm)
 		/* Ensure server rejects the connection if downgraded too far */
 		SSL_CTX_set_mode(sslctx, SSL_MODE_SEND_FALLBACK_SCSV);
 #endif
+		/* Disable TLS1.2 ciphersuites */
+		SSL_CTX_set_cipher_list(sslctx, CIPHER_LIST ":-TLSv1.2");
 	}
 
 	SSL_CTX_set_options(sslctx, options);
+
+#ifdef SSL_OP_NO_TICKET
+	SSL_CTX_clear_options(sslctx, SSL_OP_NO_TICKET);
+#endif
 
 	return CURLE_OK;
 }
@@ -646,8 +667,8 @@ static CURLcode fetch_curl_set_options(struct curl_fetch_info *f)
 		SETOPT(CURLOPT_PROXY, NULL);
 	}
 
-	/* Disable SSL session ID caching, as some servers can't cope. */
-	SETOPT(CURLOPT_SSL_SESSIONID_CACHE, 0);
+	/* Force-enable SSL session ID caching, as some distros are odd. */
+	SETOPT(CURLOPT_SSL_SESSIONID_CACHE, 1);
 
 	if (urldb_get_cert_permissions(f->url)) {
 		/* Disable certificate verification */
@@ -1158,7 +1179,7 @@ static void fetch_curl_poll(lwc_string *scheme_ignored)
 				&exc_fd_set, &max_fd);
 		assert(codem == CURLM_OK);
 
-		NSLOG(netsurf, INFO,
+		NSLOG(netsurf, DEEPDEBUG,
 		      "Curl file descriptor states (maxfd=%i):", max_fd);
 		for (i = 0; i <= max_fd; i++) {
 			bool read = false;
@@ -1175,7 +1196,7 @@ static void fetch_curl_poll(lwc_string *scheme_ignored)
 				error = true;
 			}
 			if (read || write || error) {
-				NSLOG(netsurf, INFO, "  fd %i: %s %s %s", i,
+				NSLOG(netsurf, DEEPDEBUG, "  fd %i: %s %s %s", i,
 				      read ? "read" : "    ",
 				      write ? "write" : "     ",
 				      error ? "error" : "     ");
@@ -1187,7 +1208,7 @@ static void fetch_curl_poll(lwc_string *scheme_ignored)
 	do {
 		codem = curl_multi_perform(fetch_curl_multi, &running);
 		if (codem != CURLM_OK && codem != CURLM_CALL_MULTI_PERFORM) {
-			NSLOG(netsurf, INFO, "curl_multi_perform: %i %s",
+			NSLOG(netsurf, WARNING, "curl_multi_perform: %i %s",
 			      codem, curl_multi_strerror(codem));
 			guit->misc->warning("MiscError", curl_multi_strerror(codem));
 			return;
@@ -1508,6 +1529,7 @@ nserror fetch_curl_register(void)
 	SETOPT(CURLOPT_LOW_SPEED_TIME, 180L);
 	SETOPT(CURLOPT_NOSIGNAL, 1L);
 	SETOPT(CURLOPT_CONNECTTIMEOUT, nsoption_uint(curl_fetch_timeout));
+	SETOPT(CURLOPT_SSL_CIPHER_LIST, CIPHER_LIST);
 
 	if (nsoption_charp(ca_bundle) &&
 	    strcmp(nsoption_charp(ca_bundle), "")) {

@@ -20,6 +20,7 @@
 #include <libcss/libcss.h>
 
 #include "css/dump.h"
+#include "css/utils.h"
 
 /**
  * Dump a fixed point value to the stream in a textual form.
@@ -111,6 +112,45 @@ static void dump_css_unit(FILE *stream, css_fixed val, css_unit unit)
 		break;
 	case CSS_UNIT_KHZ:
 		fprintf(stream, "kHz");
+		break;
+	case CSS_UNIT_CAP:
+		fprintf(stream, "cap");
+		break;
+	case CSS_UNIT_CH:
+		fprintf(stream, "ch");
+		break;
+	case CSS_UNIT_IC:
+		fprintf(stream, "ic");
+		break;
+	case CSS_UNIT_REM:
+		fprintf(stream, "rem");
+		break;
+	case CSS_UNIT_LH:
+		fprintf(stream, "lh");
+		break;
+	case CSS_UNIT_RLH:
+		fprintf(stream, "rlh");
+		break;
+	case CSS_UNIT_VH:
+		fprintf(stream, "vh");
+		break;
+	case CSS_UNIT_VW:
+		fprintf(stream, "vw");
+		break;
+	case CSS_UNIT_VI:
+		fprintf(stream, "vi");
+		break;
+	case CSS_UNIT_VB:
+		fprintf(stream, "vb");
+		break;
+	case CSS_UNIT_VMIN:
+		fprintf(stream, "vmin");
+		break;
+	case CSS_UNIT_VMAX:
+		fprintf(stream, "vmax");
+		break;
+	case CSS_UNIT_Q:
+		fprintf(stream, "q");
 		break;
 	}
 }
@@ -783,7 +823,7 @@ void nscss_dump_computed_style(FILE *stream, const css_computed_style *style)
 	}
 
 	/* display */
-	val = css_computed_display_static(style);
+	val = ns_computed_display_static(style);
 	switch (val) {
 	case CSS_DISPLAY_INLINE:
 		fprintf(stream, "display: inline ");
@@ -1268,7 +1308,7 @@ void nscss_dump_computed_style(FILE *stream, const css_computed_style *style)
 	}
 
 	/* min-height */
-	val = css_computed_min_height(style, &len1, &unit1);
+	val = ns_computed_min_height(style, &len1, &unit1);
 	switch (val) {
 	case CSS_MIN_HEIGHT_SET:
 		fprintf(stream, "min-height: ");
@@ -1282,7 +1322,7 @@ void nscss_dump_computed_style(FILE *stream, const css_computed_style *style)
 	}
 
 	/* min-width */
-	val = css_computed_min_width(style, &len1, &unit1);
+	val = ns_computed_min_width(style, &len1, &unit1);
 	switch (val) {
 	case CSS_MIN_WIDTH_SET:
 		fprintf(stream, "min-width: ");

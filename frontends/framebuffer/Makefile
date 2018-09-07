@@ -130,9 +130,11 @@ define convert_font
 
 S_FONTS += $(2)
 
-$(2): $(1) $(TOOLROOT)/convert_font
+$(2) $(3): $(1) $(TOOLROOT)/convert_font
 	$(VQ)echo "    FONT: $(1) ($(4))"
 	$(Q)$(TOOLROOT)/convert_font -H $(3) $(1) $(2)
+
+frontends/framebuffer/font_internal.c: $(2)
 
 endef
 
@@ -168,14 +170,15 @@ EXETARGET := nsfb
 
 NETSURF_FRAMEBUFFER_RESOURCE_LIST := adblock.css credits.html	\
 	default.css internal.css licence.html			\
-	netsurf.png quirks.css welcome.html maps.html Messages
+	netsurf.png quirks.css welcome.html maps.html
 
 install-framebuffer:
 	$(Q)$(MKDIR) -p $(DESTDIR)$(NETSURF_FRAMEBUFFER_BIN)
 	$(Q)$(MKDIR) -p $(DESTDIR)$(NETSURF_FRAMEBUFFER_RESOURCES)
 	$(Q)cp -v $(EXETARGET) $(DESTDIR)/$(NETSURF_FRAMEBUFFER_BIN)netsurf-fb
 	$(Q)for F in $(NETSURF_FRAMEBUFFER_RESOURCE_LIST); do cp -vL $(FRONTEND_RESOURCES_DIR)/$$F $(DESTDIR)/$(NETSURF_FRAMEBUFFER_RESOURCES); done
-	$(Q)$(SPLIT_MESSAGES) -l en -p fb -f messages resources/FatMessages | gzip -9n > $(DESTDIR)$(NETSURF_FRAMEBUFFER_RESOURCES)messages
+	$(Q)$(RM) $(DESTDIR)$(NETSURF_FRAMEBUFFER_RESOURCES)messages
+	$(Q)$(SPLIT_MESSAGES) -l en -p fb -f messages -o $(DESTDIR)$(NETSURF_FRAMEBUFFER_RESOURCES)messages -z resources/FatMessages
 
 # ----------------------------------------------------------------------------
 # Package target

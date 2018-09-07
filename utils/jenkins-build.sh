@@ -82,8 +82,8 @@ case ${TARGET} in
 
 	esac
 
-	PKG_SRC=NetSurf
-	PKG_SFX=
+	PKG_SRC=netsurf_x86-3.8-1-x86_gcc2
+	PKG_SFX=.hpkg
 	;;
 
 
@@ -133,6 +133,23 @@ case ${TARGET} in
     "amiga")
 	case ${HOST} in
 	    "ppc-amigaos")
+		;;
+
+	    *)
+		echo "Target \"${TARGET}\" cannot be built on \"${HOST})\""
+		exit 1
+		;;
+
+	esac
+
+	PKG_SRC=NetSurf_Amiga/netsurf
+	PKG_SFX=.lha
+	;;
+
+
+    "amigaos3")
+	case ${HOST} in
+	    "m68k-unknown-amigaos")
 		;;
 
 	    *)
@@ -291,6 +308,11 @@ case ${TARGET} in
 		export GCCSDK_INSTALL_CROSSBIN=/opt/netsurf/${HOST}/cross/bin
 		;;
 
+	    "m68k-unknown-amigaos")
+		export GCCSDK_INSTALL_ENV=/opt/netsurf/${HOST}/env
+		export GCCSDK_INSTALL_CROSSBIN=/opt/netsurf/${HOST}/cross/bin
+		;;
+
 	    *)
 		echo "Target \"${TARGET}\" cannot be built on \"${HOST})\""
 		exit 1
@@ -389,6 +411,17 @@ if [ ${HAVE_DISTCC} = "true" ];then
 fi
 
 
+########### Prepare a Makefile.config ##################
+
+rm -f Makefile.config
+cat > Makefile.config <<EOF
+override NETSURF_LOG_LEVEL := DEBUG
+EOF
+
+########### Additional environment info ########
+
+uname -a
+
 
 ########### Build from source ##################
 
@@ -399,17 +432,15 @@ ${MAKE} clean
 ${MAKE} -j ${PARALLEL} -k CI_BUILD=${BUILD_NUMBER} ATARIARCH=${ATARIARCH} Q=
 
 
-
 ############ Package artifact construction ################
 
 # build the package file
-${MAKE} -k CI_BUILD=${BUILD_NUMBER} ATARIARCH=${ATARIARCH} package Q=
+${MAKE} -k CI_BUILD=${BUILD_NUMBER} ATARIARCH=${ATARIARCH} PACKAGER="NetSurf Developers <support@netsurf-browser.org>" Q= package
 
 if [ ! -f "${PKG_SRC}${PKG_SFX}" ]; then
     # unable to find package file
     exit 1
 fi
-
 
 
 ############ Package artifact deployment ################

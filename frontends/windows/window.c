@@ -534,7 +534,6 @@ nsws_window_throbber_create(HINSTANCE hInstance,
 			    struct gui_window *gw)
 {
 	HWND hwnd;
-	char avi[PATH_MAX];
 	int urlx, urly, urlwidth, urlheight;
 
 	urlbar_dimensions(hWndParent,
@@ -554,9 +553,8 @@ nsws_window_throbber_create(HINSTANCE hInstance,
 			    hInstance,
 			    NULL);
 
-	nsws_find_resource(avi, "throbber.avi", "windows/res/throbber.avi");
-	NSLOG(netsurf, INFO, "setting throbber avi as %s", avi);
-	Animate_Open(hwnd, avi);
+	Animate_Open(hwnd, MAKEINTRESOURCE(IDR_THROBBER_AVI));
+
 	if (gw->throbbing) {
 		Animate_Play(hwnd, 0, -1, -1);
 	} else {
@@ -1274,7 +1272,7 @@ nsws_window_command(HWND hwnd,
 		break;
 
 	case IDM_HELP_ABOUT:
-		nsws_about_dialog_init(hinst, gw->main);
+		nsw32_about_dialog_init(hinst, gw->main);
 		break;
 
 	case IDC_MAIN_LAUNCH_URL:

@@ -340,7 +340,7 @@ buttons_redraw(struct gui_window *g, struct element *e, struct rect *clip, const
 	plot_style_t style = {
 		.fill_colour = WINDOW_BACKGROUND,
 		.stroke_colour = WINDOW_BORDER,
-		.stroke_width = 1,
+		.stroke_width = plot_style_int_to_fixed(1),
 	};
 	struct bitmap *b;
 	bool back, forward;
@@ -596,12 +596,12 @@ status_redraw(struct gui_window *g, struct element *e, struct rect *clip, const 
 	struct plot_font_style fontstyle = {
 		.weight = 400,
 		.family = PLOT_FONT_FAMILY_SANS_SERIF,
-		.size = 10 * FONT_SIZE_SCALE,
+		.size = 10 * PLOT_STYLE_SCALE,
 	};
 	plot_style_t style = {
 		.fill_colour = WINDOW_BACKGROUND,
 		.stroke_colour = WINDOW_BORDER,
-		.stroke_width = 1,
+		.stroke_width = plot_style_int_to_fixed(1),
 	};
 
 	ctx->plot->clip(NULL, clip);
@@ -673,7 +673,7 @@ searchbuttons_redraw(struct gui_window *g, struct element *e, struct rect *clip,
 	plot_style_t style = {
 		.fill_colour = WINDOW_BACKGROUND,
 		.stroke_colour = WINDOW_BORDER,
-		.stroke_width = 1,
+		.stroke_width = plot_style_int_to_fixed(1),
 	};
 
 	ctx->plot->clip(NULL, clip);
@@ -719,7 +719,7 @@ window_create(struct browser_window *bw, struct gui_window *existing, gui_window
 		.border_width = 1,
 		.text = {
 			.family = PLOT_FONT_FAMILY_SANS_SERIF,
-			.size = 12 * FONT_SIZE_SCALE,
+			.size = 12 * PLOT_STYLE_SCALE,
 			.weight = 400,
 		},
 	};
@@ -1063,7 +1063,7 @@ gui_window_redraw(struct gui_window *g, const struct rect *clip, const struct re
 
 	if (g->caret.h) {
 		style.stroke_type = PLOT_OP_TYPE_SOLID;
-		style.stroke_width = 1;
+		style.stroke_width = plot_style_int_to_fixed(1);
 		style.stroke_colour = CARET_STROKE;
 		ctx->plot->clip(NULL, NULL);
 		ctx->plot->line(NULL, &style, &(struct rect){g->caret.x, g->caret.y, g->caret.x, g->caret.y + g->caret.h});

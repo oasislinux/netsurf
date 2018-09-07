@@ -28,11 +28,15 @@
  * it that has good coverage along side the other tests.
  */
 
+#include <stdint.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
-#include "utils/hashtable.h"
+#include <zlib.h>
+#include <errno.h>
+
 #include "utils/log.h"
+#include "utils/hashtable.h"
 
 
 struct hash_entry {
@@ -46,6 +50,8 @@ struct hash_table {
 	struct hash_entry **chain;
 };
 
+/** maximum length of line for file or inline add */
+#define LINE_BUFFER_SIZE 512
 
 /**
  * Hash a string, returning a 32bit value.  The hash algorithm used is
@@ -72,6 +78,175 @@ static inline unsigned int hash_string_fnv(const char *datum, unsigned int *len)
 	*len = datum - start;
 
 	return z;
+}
+
+
+
+/**
+ * process a line of input.
+ *
+ * \param hash The hash table to add the line to
+ * \param ln The line to process
+ * \param lnlen The length of \ln
+ * \return NSERROR_OK on success else NSERROR_INVALID
+ */
+static nserror
+process_line(struct hash_table *hash, uint8_t *ln, int lnlen)
+{
+	uint8_t *key;
+	uint8_t *value;
+	uint8_t *colon;
+
+	key = ln; /* set key to start of line */
+	value = ln + lnlen; /* set value to end of line */
+
+	/* skip leading whitespace */
+	while ((key < value) &&
+	       ((*key == ' ') || (*key == '\t'))) {
+		key++;
+	}
+
+	/* empty or comment lines */
+	if ((*key == 0) || (*key == '#')) {
+		return NSERROR_OK;
+	}
+
+	/* find first colon as key/value separator */
+	for (colon = key; colon < value; colon++) {
+		if (*colon == ':') {
+			break;
+		}
+	}
+	if (colon == value) {
+		/* no colon found */
+		return NSERROR_INVALID;
+	}
+
+	*colon = 0;  /* terminate key */
+	value = colon + 1;
+
+	if (hash_add(hash, (char *)key, (char *)value) == false) {
+		NSLOG(netsurf, INFO,
+		      "Unable to add %s:%s to hash table", ln, value);
+		return NSERROR_INVALID;
+	}
+	return NSERROR_OK;
+}
+
+
+/**
+ * adds key/value pairs to a hash from a memory area
+ */
+static nserror
+hash_add_inline_plain(struct hash_table *ht, const uint8_t *data, size_t size)
+{
+	uint8_t s[LINE_BUFFER_SIZE]; /* line buffer */
+	unsigned int slen = 0;
+	nserror res = NSERROR_OK;
+
+	while (size > 0) {
+		s[slen] = *data;
+
+		if (s[slen] == '\n') {
+			s[slen] = 0; /* replace newline with null termination */
+			res = process_line(ht, s, slen);
+			slen = 0;
+			if (res != NSERROR_OK) {
+				break;
+			}
+		} else {
+			slen++;
+			if (slen > sizeof s) {
+				NSLOG(netsurf, INFO, "Overlength line\n");
+				slen = 0;
+			}
+		}
+
+		size--;
+		data++;
+	}
+	if (slen > 0) {
+		s[slen] = 0;
+		res = process_line(ht, s, slen);
+	}
+
+	return res;
+}
+
+/**
+ * adds key/value pairs to a hash from a compressed memory area
+ */
+static nserror
+hash_add_inline_gzip(struct hash_table *ht, const uint8_t *data, size_t size)
+{
+	nserror res;
+	int ret; /* zlib return value */
+	z_stream strm;
+	uint8_t s[LINE_BUFFER_SIZE]; /* line buffer */
+	size_t used = 0; /* number of bytes in buffer in use */
+	uint8_t *nl;
+
+	strm.zalloc = Z_NULL;
+	strm.zfree = Z_NULL;
+	strm.opaque = Z_NULL;
+
+	strm.next_in = (uint8_t *)data;
+	strm.avail_in = size;
+
+	ret = inflateInit2(&strm, 32 + MAX_WBITS);
+	if (ret != Z_OK) {
+		NSLOG(netsurf, INFO, "inflateInit returned %d", ret);
+		return NSERROR_INVALID;
+	}
+
+	do {
+		strm.next_out = s + used;
+		strm.avail_out = sizeof(s) - used;
+
+		ret = inflate(&strm, Z_NO_FLUSH);
+		if ((ret != Z_OK) && (ret != Z_STREAM_END)) {
+			break;
+		}
+
+		used = sizeof(s) - strm.avail_out;
+		while (used > 0) {
+			/* find nl */
+			for (nl = &s[0]; nl < &s[used]; nl++) {
+				if (*nl == '\n') {
+					break;
+				}
+			}
+			if (nl == &s[used]) {
+				/* no nl found */
+				break;
+			}
+			/* found newline */
+			*nl = 0; /* null terminate line */
+			res = process_line(ht, &s[0], nl - &s[0]);
+			if (res != NSERROR_OK) {
+				inflateEnd(&strm);
+				return res;
+			}
+
+			/* move data down */
+			memmove(&s[0], nl + 1, used - ((nl + 1) - &s[0]) );
+			used -= ((nl +1) - &s[0]);
+		}
+		if (used == sizeof(s)) {
+			/* entire buffer used and no newline */
+			NSLOG(netsurf, INFO, "Overlength line");
+			used = 0;
+		}
+	} while (ret != Z_STREAM_END);
+
+	inflateEnd(&strm);
+
+	if (ret != Z_STREAM_END) {
+		NSLOG(netsurf, INFO, "inflate returned %d", ret);
+		return NSERROR_INVALID;
+	}
+	return NSERROR_OK;
+
 }
 
 
@@ -178,4 +353,52 @@ const char *hash_get(struct hash_table *ht, const char *key)
 			return e->pairing + key_length + 1;
 
 	return NULL;
+}
+
+
+
+/* exported interface documented in utils/hashtable.h */
+nserror hash_add_file(struct hash_table *ht, const char *path)
+{
+	nserror res = NSERROR_OK;
+	char s[LINE_BUFFER_SIZE]; /* line buffer */
+	gzFile fp; /* compressed file handle */
+
+	if (path == NULL) {
+		return NSERROR_BAD_PARAMETER;
+	}
+
+	fp = gzopen(path, "r");
+	if (!fp) {
+		NSLOG(netsurf, INFO,
+		      "Unable to open file \"%.100s\": %s", path,
+		      strerror(errno));
+
+		return NSERROR_NOT_FOUND;
+	}
+
+	while (gzgets(fp, s, sizeof s)) {
+		int slen = strlen(s);
+		s[--slen] = 0;  /* remove \n at end */
+
+		res = process_line(ht, (uint8_t *)s, slen);
+		if (res != NSERROR_OK) {
+			break;
+		}
+	}
+
+	gzclose(fp);
+
+	return res;
+}
+
+
+/* exported interface documented in utils/hashtable.h */
+nserror hash_add_inline(struct hash_table *ht, const uint8_t *data, size_t size)
+{
+	if ((data[0]==0x1f) && (data[1] == 0x8b)) {
+		/* gzip header detected */
+		return hash_add_inline_gzip(ht, data, size);
+	}
+	return hash_add_inline_plain(ht, data, size);
 }

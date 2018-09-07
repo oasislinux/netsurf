@@ -534,8 +534,7 @@ nsgtk_window_tool_bar_clicked(GtkToolbar *toolbar,
 	popup_menu_hide(g->menu_popup, true, false, true, false);
 	popup_menu_show(g->menu_popup, false, false, false, true);
 
-	gtk_menu_popup(g->menu_popup->popup_menu, NULL, NULL, NULL, NULL, 0,
-		       gtk_get_current_event_time());
+	nsgtk_menu_popup_at_pointer(g->menu_popup->popup_menu, NULL);
 
 	return TRUE;
 }
@@ -780,7 +779,7 @@ MULTIHANDLER(savepage)
 	gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(fc), filter);
 	gtk_file_chooser_set_filter(GTK_FILE_CHOOSER(fc), filter);
 
-	res = nsurl_nice(browser_window_get_url(
+	res = nsurl_nice(browser_window_access_url(
 			nsgtk_get_browser_window(g->top_level)), &path, false);
 	if (res != NSERROR_OK) {
 		path = strdup(messages_get("SaveText"));
@@ -842,7 +841,7 @@ MULTIHANDLER(pdf)
 
 	NSLOG(netsurf, INFO, "Print preview (generating PDF)  started.");
 
-	res = nsurl_nice(browser_window_get_url(bw), &url_name, true);
+	res = nsurl_nice(browser_window_access_url(bw), &url_name, true);
 	if (res != NSERROR_OK) {
 		nsgtk_warning(messages_get_errorcode(res), 0);
 		return TRUE;
@@ -915,7 +914,7 @@ MULTIHANDLER(plaintext)
 	char *filename;
 	nserror res;
 
-	res = nsurl_nice(browser_window_get_url(
+	res = nsurl_nice(browser_window_access_url(
 			nsgtk_get_browser_window(g->top_level)),
 			&filename, false);
 	if (res != NSERROR_OK) {
@@ -1616,7 +1615,7 @@ MULTIHANDLER(addbookmarks)
 
 	if (bw == NULL || !browser_window_has_content(bw))
 		return TRUE;
-	hotlist_add_url(browser_window_get_url(bw));
+	hotlist_add_url(browser_window_access_url(bw));
 	return TRUE;
 }
 
@@ -2073,7 +2072,7 @@ struct nsgtk_scaffolding *nsgtk_new_scaffolding(struct gui_window *toplevel)
 	int i;
 	GtkAccelGroup *group;
 
-	gs = malloc(sizeof(*gs));
+	gs = calloc(1, sizeof(*gs));
 	if (gs == NULL) {
 		return NULL;
 	}
@@ -2491,7 +2490,11 @@ gui_search_web_provider_update(const char *provider_name,
 
 	/* set the search provider parameters up in each scaffold */
 	for (current = scaf_list; current != NULL; current = current->next) {
-	/* add ico to each window's toolbar */
+		if (current->webSearchEntry == NULL) {
+			continue;
+		}
+
+		/* add ico to each window's toolbar */
 		if (srch_pixbuf != NULL) {
 			nsgtk_entry_set_icon_from_pixbuf(current->webSearchEntry,
 							 GTK_ENTRY_ICON_PRIMARY,
@@ -2747,8 +2750,7 @@ void nsgtk_scaffolding_context_menu(struct nsgtk_scaffolding *g,
 		popup_menu_hide(g->menu_popup, false, false, false, true);
 	}
 
-	gtk_menu_popup(gtkmenu, NULL, NULL, NULL, NULL, 0,
-		       gtk_get_current_event_time());
+	nsgtk_menu_popup_at_pointer(gtkmenu, NULL);
 }
 
 /**

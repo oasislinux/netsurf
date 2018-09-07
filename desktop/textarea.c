@@ -45,9 +45,9 @@
 #define TA_ALLOC_STEP 512
 
 static plot_style_t pstyle_stroke_caret = {
-    .stroke_type = PLOT_OP_TYPE_SOLID,
-    .stroke_colour = CARET_COLOR,
-    .stroke_width = 1,
+	.stroke_type = PLOT_OP_TYPE_SOLID,
+	.stroke_colour = CARET_COLOR,
+	.stroke_width = plot_style_int_to_fixed(1),
 };
 
 struct line_info {
@@ -1803,6 +1803,10 @@ static void textarea_setup_text_offsets(struct textarea *ta)
 {
 	int text_y_offset, text_y_offset_baseline;
 
+	ta->line_height = FIXTOINT(FMUL(FLTTOFIX(1.3), FDIV(FMUL(
+			nscss_screen_dpi, FDIV(INTTOFIX(ta->fstyle.size),
+			INTTOFIX(PLOT_STYLE_SCALE))), F_72)));
+
 	text_y_offset = text_y_offset_baseline = ta->border_width;
 	if (ta->flags & TEXTAREA_MULTILINE) {
 		/* Multiline textarea */
@@ -1821,6 +1825,27 @@ static void textarea_setup_text_offsets(struct textarea *ta)
 	ta->text_y_offset_baseline = text_y_offset_baseline;
 }
 
+
+/**
+ * Set font styles up for a textarea.
+ *
+ * \param[in] ta             Textarea to update.
+ * \param[in] fstyle         Font style to set in textarea.
+ * \param[in] selected_text  Textarea selected text colour.
+ * \param[in] selected_bg    Textarea selection background colour.
+ */
+static void textarea_set_text_style(
+		struct textarea *ta,
+		const plot_font_style_t *fstyle,
+		colour selected_text,
+		colour selected_bg)
+{
+	ta->fstyle = *fstyle;
+
+	ta->sel_fstyle = *fstyle;
+	ta->sel_fstyle.foreground = selected_text;
+	ta->sel_fstyle.background = selected_bg;
+}
 
 
 /* exported interface, documented in textarea.h */
@@ -1861,11 +1886,10 @@ struct textarea *textarea_create(const textarea_flags flags,
 	ret->border_width = setup->border_width;
 	ret->border_col = setup->border_col;
 
-	ret->fstyle = setup->text;
-
-	ret->sel_fstyle = setup->text;
-	ret->sel_fstyle.foreground = setup->selected_text;
-	ret->sel_fstyle.background = setup->selected_bg;
+	textarea_set_text_style(ret,
+			&setup->text,
+			setup->selected_text,
+			setup->selected_bg);
 
 	ret->scroll_x = 0;
 	ret->scroll_y = 0;
@@ -1924,7 +1948,7 @@ struct textarea *textarea_create(const textarea_flags flags,
 
 	ret->line_height = FIXTOINT(FMUL(FLTTOFIX(1.3), FDIV(FMUL(
 			nscss_screen_dpi, FDIV(INTTOFIX(setup->text.size),
-			INTTOFIX(FONT_SIZE_SCALE))), F_72)));
+			INTTOFIX(PLOT_STYLE_SCALE))), F_72)));
 
 	ret->caret_pos.line = ret->caret_pos.byte_off = -1;
 	ret->caret_x = 0;
@@ -2861,7 +2885,7 @@ bool textarea_keypress(struct textarea *ta, uint32_t key)
 			return false;
 	}
 
-	redraw &= ~textarea_set_caret_internal(ta, caret);
+	redraw &= !textarea_set_caret_internal(ta, caret);
 
 	/* TODO: redraw only the bit that changed */
 	msg.ta = ta;
@@ -3220,8 +3244,12 @@ void textarea_set_dimensions(struct textarea *ta, int width, int height)
 
 
 /* exported interface, documented in textarea.h */
-void textarea_set_layout(struct textarea *ta, int width, int height,
-		int top, int right, int bottom, int left)
+void textarea_set_layout(
+		struct textarea *ta,
+		const plot_font_style_t *fstyle,
+		int width, int height,
+		int top, int right,
+		int bottom, int left)
 {
 	struct rect r = {0, 0, 0, 0};
 
@@ -3231,6 +3259,10 @@ void textarea_set_layout(struct textarea *ta, int width, int height,
 	ta->pad_right = right + ((ta->bar_y == NULL) ? 0 : SCROLLBAR_WIDTH);
 	ta->pad_bottom = bottom + ((ta->bar_x == NULL) ? 0 : SCROLLBAR_WIDTH);
 	ta->pad_left = left;
+
+	textarea_set_text_style(ta, fstyle,
+			ta->sel_fstyle.foreground,
+			ta->sel_fstyle.background);
 
 	textarea_setup_text_offsets(ta);
 

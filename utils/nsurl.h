@@ -181,6 +181,24 @@ const char *nsurl_access(const nsurl *url);
 
 
 /**
+ * Variant of \ref nsurl_access for logging.
+ *
+ * \param url	  NetSurf URL to retrieve a string pointer for.
+ * \return the required string
+ *
+ * This will not necessarily return the actual nsurl's URL, but something
+ * that is suitable for recording to logs.  E.g. URLs with the `data` scheme
+ * will return a simple place holder, to avoid repeatedly dumping loads of data.
+ *
+ * The returned string is owned by the NetSurf URL object.  It will die
+ * with the NetSurf URL object.  Keep a reference to the URL if you need it.
+ *
+ * The returned string has a trailing '\0'.
+ */
+const char *nsurl_access_log(const nsurl *url);
+
+
+/**
  * Get a UTF-8 string (for human readable IDNs) from a NetSurf URL object
  *
  * \param url	  NetSurf URL object
@@ -297,6 +315,25 @@ nserror nsurl_refragment(const nsurl *url, lwc_string *frag, nsurl **new_url);
  * Any query component in url is replaced with query in new_url.
  */
 nserror nsurl_replace_query(const nsurl *url, const char *query,
+		nsurl **new_url);
+
+
+/**
+ * Create a NetSurf URL object, with scheme replaced
+ *
+ * \param url	  NetSurf URL to create new NetSurf URL from
+ * \param scheme  Scheme to use
+ * \param new_url Returns new NetSurf URL with scheme provided
+ * \return NSERROR_OK on success, appropriate error otherwise
+ *
+ * If return value != NSERROR_OK, nothing will be returned in new_url.
+ *
+ * It is up to the client to call nsurl_unref when they are finished with
+ * the created object.
+ *
+ * Any scheme component in url is replaced with scheme in new_url.
+ */
+nserror nsurl_replace_scheme(const nsurl *url, lwc_string *scheme,
 		nsurl **new_url);
 
 

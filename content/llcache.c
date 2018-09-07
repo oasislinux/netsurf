@@ -86,7 +86,7 @@ struct llcache_handle {
 typedef struct llcache_object_user {
 	llcache_handle *handle;		/**< Handle data for client */
 
-	bool iterator_target;		/**< This is the an iterator target */
+	bool iterator_target;		/**< This is the iterator target */
 	bool queued_for_delete;		/**< This user is queued for deletion */
 
 	struct llcache_object_user *prev;	/**< Previous in list */
@@ -109,11 +109,15 @@ typedef struct {
 
 	uint32_t retries_remaining;     /**< Number of times to retry on timeout */
 
+	bool hsts_in_use;		/**< Whether HSTS applies to this fetch */
+
 	bool tried_with_auth;		/**< Whether we've tried with auth */
 
 	bool tried_with_tls_downgrade;	/**< Whether we've tried TLS <= 1.0 */
 
 	bool outstanding_query;		/**< Waiting for a query response */
+
+	bool tainted_tls;		/**< Whether the TLS transport is tainted */
 } llcache_fetch_ctx;
 
 /**
@@ -126,7 +130,7 @@ typedef enum {
 } llcache_validate;
 
 /**
- * cache control value for invalid age.
+ * Cache control value for invalid age.
  */
 #define INVALID_AGE -1
 
@@ -150,7 +154,7 @@ typedef struct {
 	char *value;		/**< Header value */
 } llcache_header;
 
-/** Current status of objects data */
+/** Current status of an object's data */
 typedef enum {
 	LLCACHE_STATE_RAM = 0, /**< source data is stored in RAM only */
 	LLCACHE_STATE_DISC, /**< source data is stored on disc */
@@ -191,7 +195,7 @@ struct llcache_object {
 
 	/* Instrumentation. These elements are strictly for information
 	 * to improve the cache performance and to provide performance
-	 * metrics. The values are non-authorative and must not be used to
+	 * metrics. The values are non-authoritative and must not be used to
 	 * determine object lifetime etc.
 	 */
 	time_t last_used; /**< time the last user was removed from the object */
@@ -477,6 +481,14 @@ static nserror llcache_post_data_clone(const llcache_post_data *orig,
 /**
  * Split a fetch header into name and value
  *
+ * HTTP header splitting according to grammar defined in RFC7230 section 3.2
+ *   https://tools.ietf.org/html/rfc7230#section-3.2
+ *
+ * This implementation is non conformant in that it:
+ *  - includes carrige return and newline in whitespace (3.2.3)
+ *  - allows whitespace before and after the field-name token (3.2.4)
+ *  - does not handle obsolete line folding (3.2.4)
+ *
  * \param data	 Header string
  * \param len	 Byte length of header
  * \param name	 Pointer to location to receive header name
@@ -562,127 +574,146 @@ static nserror llcache_fetch_split_header(const uint8_t *data, size_t len,
 }
 
 /**
- * Parse a fetch header
+ * parse cache control header value
  *
- * \param object  Object to parse header for
- * \param data	  Header string
- * \param len	  Byte length of header
- * \param name	  Pointer to location to receive header name
- * \param value	  Pointer to location to receive header value
+ * \param object Object to parse header for
+ * \param value header value
  * \return NSERROR_OK on success, appropriate error otherwise
- *
- * \note This function also has the side-effect of updating
- *	 the cache control data for the object if an interesting
- *	 header is encountered
  */
-static nserror llcache_fetch_parse_header(llcache_object *object,
-		const uint8_t *data, size_t len, char **name, char **value)
+static nserror
+llcache_fetch_parse_cache_control(llcache_object *object, char *value)
 {
-	nserror res;
+	const char *start = value;
+	const char *comma = value;
 
-	/* Set fetch response time if not already set */
-	if (object->cache.res_time == 0) {
-		object->cache.res_time = time(NULL);
-        }
+	while (*comma != '\0') {
+		while (*comma != '\0' && *comma != ',') {
+			comma++;
+		}
 
-	/* Decompose header into name-value pair */
-	res = llcache_fetch_split_header(data, len, name, value);
-	if (res != NSERROR_OK) {
-		return res;
-        }
-
-	/* Parse cache headers to populate cache control data */
-
-	if ((5 < len) &&
-            strcasecmp(*name, "Date") == 0) {
-		/* extract Date header */
-                nsc_strntimet(*value,
-                              strlen(*value),
-                              &object->cache.date);
-	} else if ((4 < len) &&
-                   strcasecmp(*name, "Age") == 0) {
-		/* extract Age header */
-		if ('0' <= **value && **value <= '9') {
-			object->cache.age = atoi(*value);
-                }
-	} else if ((8 < len) &&
-                   strcasecmp(*name, "Expires") == 0) {
-		/* extract Expires header */
-                res = nsc_strntimet(*value,
-                                    strlen(*value),
-                                    &object->cache.expires);
-                if (res != NSERROR_OK) {
-                        object->cache.expires = (time_t)0x7fffffff;
-                }
-	} else if ((14 < len) &&
-                   strcasecmp(*name, "Cache-Control") == 0) {
-		/* extract and parse Cache-Control header */
-		const char *start = *value;
-		const char *comma = *value;
-
-		while (*comma != '\0') {
-			while (*comma != '\0' && *comma != ',') {
-				comma++;
-                        }
-
-			if ((8 < comma - start) &&
-                            (strncasecmp(start,	"no-cache", 8) == 0 ||
-                             strncasecmp(start, "no-store", 8) == 0)) {
-				/**
-                                 * \todo When we get a disk cache we should
-                                 *  distinguish between these two.
-                                 */
-				object->cache.no_cache = LLCACHE_VALIDATE_ALWAYS;
-			} else if ((7 < comma - start) &&
-                                   strncasecmp(start, "max-age", 7) == 0) {
-				/* Find '=' */
-				while (start < comma && *start != '=') {
-					start++;
-                                }
-
-				/* Skip over it */
+		if ((8 < comma - start) &&
+		    (strncasecmp(start,	"no-cache", 8) == 0 ||
+		     strncasecmp(start, "no-store", 8) == 0)) {
+			/**
+			 * \todo When we get a disk cache we should
+			 *  distinguish between these two.
+			 */
+			object->cache.no_cache = LLCACHE_VALIDATE_ALWAYS;
+		} else if ((7 < comma - start) &&
+			   strncasecmp(start, "max-age", 7) == 0) {
+			/* Find '=' */
+			while (start < comma && *start != '=') {
 				start++;
+			}
+
+			/* Skip over it */
+			start++;
 
 #define SKIP_ST(p) while (*p != '\0' && (*p == ' ' || *p == '\t')) p++
 
-				/* Skip whitespace */
-				SKIP_ST(start);
+			/* Skip whitespace */
+			SKIP_ST(start);
 
-				if (start < comma) {
-					object->cache.max_age = atoi(start);
-                                }
+			if (start < comma) {
+				object->cache.max_age = atoi(start);
 			}
+		}
 
-			if (*comma != '\0') {
-				/* Skip past comma */
-				comma++;
-				/* Skip whitespace */
-				SKIP_ST(comma);
-			}
+		if (*comma != '\0') {
+			/* Skip past comma */
+			comma++;
+			/* Skip whitespace */
+			SKIP_ST(comma);
+		}
 
 #undef SKIP_ST
 
-			/* Set start for next token */
-			start = comma;
-		}
-	} else if ((5 < len) &&
-                   (strcasecmp(*name, "ETag") == 0)) {
-		/* extract ETag header */
-		free(object->cache.etag);
-		object->cache.etag = strdup(*value);
-		if (object->cache.etag == NULL) {
-			free(*name);
-			free(*value);
-			return NSERROR_NOMEM;
-		}
-	} else if ((14 < len) &&
-                   (strcasecmp(*name, "Last-Modified") == 0)) {
-		/* extract Last-Modified header */
-                nsc_strntimet(*value,
-                              strlen(*value),
-                              &object->cache.last_modified);
+		/* Set start for next token */
+		start = comma;
 	}
+	return NSERROR_OK;
+}
 
+/**
+ * Update cache control from appropriate header
+ *
+ * \param object Object to parse header for
+ * \param name header name
+ * \param value header value
+ * \return NSERROR_OK on success, appropriate error otherwise
+ */
+static nserror
+llcache_fetch_header_cache_control(llcache_object *object,
+				   char *name,
+				   char *value)
+{
+	nserror res;
+	size_t name_len;
+
+	/* Parse cache headers to populate cache control data */
+	name_len = strlen(name);
+
+	switch (name_len) {
+	case 3:
+		if (strcasecmp(name, "Age") == 0) {
+			/* extract Age header */
+			if ('0' <= *value && *value <= '9') {
+				object->cache.age = atoi(value);
+			}
+
+		}
+		break;
+
+	case 4:
+		if (strcasecmp(name, "Date") == 0) {
+			/* extract Date header */
+			res = nsc_strntimet(value,
+					    strlen(value),
+					    &object->cache.date);
+			if (res != NSERROR_OK) {
+				NSLOG(llcache, INFO,
+				      "Processing Date header value \"%s\" returned %d",
+				      value, res);
+			}
+		} else if (strcasecmp(name, "ETag") == 0) {
+			/* extract ETag header */
+			free(object->cache.etag);
+			object->cache.etag = strdup(value);
+			if (object->cache.etag == NULL) {
+				NSLOG(llcache, INFO,
+				      "No memory to duplicate ETag");
+				return NSERROR_NOMEM;
+			}
+		}
+		break;
+
+	case 7:
+		if (strcasecmp(name, "Expires") == 0) {
+			/* process Expires header value */
+			res = nsc_strntimet(value,
+					    strlen(value),
+					    &object->cache.expires);
+			if (res != NSERROR_OK) {
+				NSLOG(llcache, INFO,
+				      "Processing Expires header value \"%s\" returned %d",
+				      value, res);
+				object->cache.expires = (time_t)0x7fffffff;
+			}
+		}
+		break;
+
+	case 13:
+		if (strcasecmp(name, "Cache-Control") == 0) {
+			/* parse Cache-Control header value */
+			llcache_fetch_parse_cache_control(object,value);
+		} else if (strcasecmp(name, "Last-Modified") == 0) {
+			/* parse Last-Modified header value */
+			nsc_strntimet(value,
+				      strlen(value),
+				      &object->cache.last_modified);
+		}
+		break;
+	}
 
 	return NSERROR_OK;
 }
@@ -729,7 +760,7 @@ static inline void llcache_invalidate_cache_control_data(llcache_object *object)
 static nserror llcache_fetch_process_header(llcache_object *object,
 		const uint8_t *data, size_t len)
 {
-	nserror error;
+	nserror res;
 	char *name, *value;
 	llcache_header *temp;
 
@@ -757,9 +788,15 @@ static nserror llcache_fetch_process_header(llcache_object *object,
 		llcache_destroy_headers(object);
 	}
 
-	error = llcache_fetch_parse_header(object, data, len, &name, &value);
-	if (error != NSERROR_OK) {
-		return error;
+	/* Set fetch response time if not already set */
+	if (object->cache.res_time == 0) {
+		object->cache.res_time = time(NULL);
+	}
+
+	/* Parse header into name-value pair */
+	res = llcache_fetch_split_header(data, len, &name, &value);
+	if (res != NSERROR_OK) {
+		return res;
 	}
 
 	/* deal with empty header */
@@ -769,9 +806,17 @@ static nserror llcache_fetch_process_header(llcache_object *object,
 		return NSERROR_OK;
 	}
 
+	/* update cache control data from header */
+	res = llcache_fetch_header_cache_control(object, name, value);
+	if (res != NSERROR_OK) {
+		free(name);
+		free(value);
+		return res;
+	}
+
 	/* Append header data to the object's headers array */
-	temp = realloc(object->headers, (object->num_headers + 1) *
-			sizeof(llcache_header));
+	temp = realloc(object->headers,
+		       (object->num_headers + 1) * sizeof(llcache_header));
 	if (temp == NULL) {
 		free(name);
 		free(value);
@@ -791,7 +836,7 @@ static nserror llcache_fetch_process_header(llcache_object *object,
 /**
  * (Re)fetch an object
  *
- * sets up headers and attempts to start an actual fetch from the
+ * Sets up headers and attempts to start an actual fetch from the
  * fetchers system updating the llcache object with the new fetch on
  * successful start.
  *
@@ -902,11 +947,12 @@ static nserror llcache_object_refetch(llcache_object *object)
  * \param referer	  Referring URL, or NULL for none
  * \param post		  POST data, or NULL for GET
  * \param redirect_count  Number of redirects followed so far
+ * \param hsts_in_use     Whether HSTS applies to this fetch
  * \return NSERROR_OK on success, appropriate error otherwise
  */
 static nserror llcache_object_fetch(llcache_object *object, uint32_t flags,
 		nsurl *referer, const llcache_post_data *post,
-		uint32_t redirect_count)
+		uint32_t redirect_count, bool hsts_in_use)
 {
 	nserror error;
 	nsurl *referer_clone = NULL;
@@ -928,6 +974,7 @@ static nserror llcache_object_fetch(llcache_object *object, uint32_t flags,
 	object->fetch.post = post_clone;
 	object->fetch.redirect_count = redirect_count;
 	object->fetch.retries_remaining = llcache->fetch_attempts;
+	object->fetch.hsts_in_use = hsts_in_use;
 
 	return llcache_object_refetch(object);
 }
@@ -1165,14 +1212,14 @@ llcache_object_remove_from_list(llcache_object *object, llcache_object **list)
 /**
  * Retrieve source data for an object from persistent store if necessary.
  *
- * If an objects source data has been placed in the persistent store
- * and the in memory copy released this will attempt to retrieve the
- * source data.
+ * If an object's source data has been placed in the persistent store
+ * and there is no in-memory copy, then attempt to retrieve the source
+ * data.
  *
  * \param object the object to operate on.
  * \return appropriate error code.
  */
-static nserror llcache_persist_retrieve(llcache_object *object)
+static nserror llcache_retrieve_persisted_data(llcache_object *object)
 {
 	/* ensure the source data is present if necessary */
 	if ((object->source_data != NULL) ||
@@ -1191,7 +1238,7 @@ static nserror llcache_persist_retrieve(llcache_object *object)
 }
 
 /**
- * Generate a serialised version of an objects metadata
+ * Generate a serialised version of an object's metadata
  *
  * The metadata includes object headers.
  *
@@ -1335,7 +1382,7 @@ operror:
 }
 
 /**
- * Deserialisation of an objects metadata.
+ * Deserialisation of an object's metadata.
  *
  * Attempt to retrieve and deserialise the metadata for an object from
  * the backing store.
@@ -1361,7 +1408,7 @@ llcache_process_metadata(llcache_object *object)
 
 	size_t source_length;
 	time_t request_time;
-	time_t reponse_time;
+	time_t response_time;
 	time_t completion_time;
 	size_t num_headers;
 	size_t hloop;
@@ -1412,7 +1459,7 @@ llcache_process_metadata(llcache_object *object)
 	nsurl_unref(metadataurl);
 
 
-	/* metadata line 2 is the objects length */
+	/* metadata line 2 is the object's length */
 	line = 2;
 	ln += lnsize + 1;
 	lnsize = strlen(ln);
@@ -1438,7 +1485,7 @@ llcache_process_metadata(llcache_object *object)
 	ln += lnsize + 1;
 	lnsize = strlen(ln);
 
-	res = nsc_snptimet(ln, lnsize, &reponse_time);
+	res = nsc_snptimet(ln, lnsize, &response_time);
 	if (res != NSERROR_OK)
 		goto format_error;
 
@@ -1485,7 +1532,7 @@ llcache_process_metadata(llcache_object *object)
 	object->source_alloc = metadatalen;
 
 	object->cache.req_time = request_time;
-	object->cache.res_time = reponse_time;
+	object->cache.res_time = response_time;
 	object->cache.fin_time = completion_time;
 
 	/* object stored in backing store */
@@ -1514,7 +1561,7 @@ format_error:
  *         cache else appropriate error code.
  */
 static nserror
-llcache_object_fetch_persistant(llcache_object *object,
+llcache_object_fetch_persistent(llcache_object *object,
 				uint32_t flags,
 				nsurl *referer,
 				const llcache_post_data *post,
@@ -1564,6 +1611,7 @@ llcache_object_fetch_persistant(llcache_object *object,
  * \param referer	  Referring URL, or NULL if none
  * \param post		  POST data, or NULL for a GET request
  * \param redirect_count  Number of redirects followed so far
+ * \param hsts_in_use     Whether HSTS applies to this fetch
  * \param result	  Pointer to location to receive retrieved object
  * \return NSERROR_OK on success, appropriate error otherwise
  */
@@ -1573,14 +1621,17 @@ llcache_object_retrieve_from_cache(nsurl *url,
 				   nsurl *referer,
 				   const llcache_post_data *post,
 				   uint32_t redirect_count,
+				   bool hsts_in_use,
 				   llcache_object **result)
 {
 	nserror error;
 	llcache_object *obj, *newest = NULL;
 
-	NSLOG(llcache, DEBUG, "Searching cache for %s flags:%x referer:%s post:%p",
-			nsurl_access(url), flags,
-			referer==NULL?"":nsurl_access(referer), post);
+	NSLOG(llcache, DEBUG,
+	      "Searching cache for %s flags:%x referer:%s post:%p",
+	      nsurl_access(url), flags,
+	      referer==NULL?"":nsurl_access(referer),
+	      post);
 
 	/* Search for the most recently fetched matching object */
 	for (obj = llcache->cached_objects; obj != NULL; obj = obj->next) {
@@ -1604,7 +1655,7 @@ llcache_object_retrieve_from_cache(nsurl *url,
 			return error;
 
 		/* attempt to retrieve object from persistent store */
-		error = llcache_object_fetch_persistant(obj, flags, referer, post, redirect_count);
+		error = llcache_object_fetch_persistent(obj, flags, referer, post, redirect_count);
 		if (error == NSERROR_OK) {
 			NSLOG(llcache, DEBUG, "retrieved object from persistent store");
 
@@ -1631,7 +1682,7 @@ llcache_object_retrieve_from_cache(nsurl *url,
 		 */
 
 		/* ensure the source data is present */
-		error = llcache_persist_retrieve(newest);
+		error = llcache_retrieve_persisted_data(newest);
 		if (error == NSERROR_OK) {
 			/* source data was successfully retrieved from
 			 * persistent store
@@ -1658,7 +1709,7 @@ llcache_object_retrieve_from_cache(nsurl *url,
 		/* Found a candidate object but it needs freshness validation */
 
 		/* ensure the source data is present */
-		error = llcache_persist_retrieve(newest);
+		error = llcache_retrieve_persisted_data(newest);
 		if (error == NSERROR_OK) {
 
 			/* Create a new object */
@@ -1681,7 +1732,7 @@ llcache_object_retrieve_from_cache(nsurl *url,
 
 			/* Attempt to kick-off fetch */
 			error = llcache_object_fetch(obj, flags, referer, post,
-						     redirect_count);
+						     redirect_count, hsts_in_use);
 			if (error != NSERROR_OK) {
 				newest->candidate_count--;
 				llcache_object_destroy(obj);
@@ -1713,7 +1764,8 @@ llcache_object_retrieve_from_cache(nsurl *url,
 	}
 
 	/* Attempt to kick-off fetch */
-	error = llcache_object_fetch(obj, flags, referer, post, redirect_count);
+	error = llcache_object_fetch(obj, flags, referer, post,
+			redirect_count, hsts_in_use);
 	if (error != NSERROR_OK) {
 		llcache_object_destroy(obj);
 		return error;
@@ -1735,6 +1787,7 @@ llcache_object_retrieve_from_cache(nsurl *url,
  * \param referer	  Referring URL, or NULL if none
  * \param post		  POST data, or NULL for a GET request
  * \param redirect_count  Number of redirects followed so far
+ * \param hsts_in_use     Whether HSTS applies to this fetch
  * \param result	  Pointer to location to receive retrieved object
  * \return NSERROR_OK on success, appropriate error otherwise
  */
@@ -1744,6 +1797,7 @@ llcache_object_retrieve(nsurl *url,
 			nsurl *referer,
 			const llcache_post_data *post,
 			uint32_t redirect_count,
+			bool hsts_in_use,
 			llcache_object **result)
 {
 	nserror error;
@@ -1798,7 +1852,7 @@ llcache_object_retrieve(nsurl *url,
 
 		/* Attempt to kick-off fetch */
 		error = llcache_object_fetch(obj, flags, referer, post,
-				redirect_count);
+				redirect_count, hsts_in_use);
 		if (error != NSERROR_OK) {
 			llcache_object_destroy(obj);
 			nsurl_unref(defragmented_url);
@@ -1809,7 +1863,8 @@ llcache_object_retrieve(nsurl *url,
 		llcache_object_add_to_list(obj, &llcache->uncached_objects);
 	} else {
 		error = llcache_object_retrieve_from_cache(defragmented_url,
-				flags, referer, post, redirect_count, &obj);
+				flags, referer, post, redirect_count,
+				hsts_in_use, &obj);
 		if (error != NSERROR_OK) {
 			nsurl_unref(defragmented_url);
 			return error;
@@ -1857,6 +1912,86 @@ static nserror llcache_object_add_user(llcache_object *object,
 }
 
 /**
+ * Transform a request-URI based on HSTS policy
+ *
+ * \param url URL to transform
+ * \param result Pointer to location to receive transformed URL
+ * \param hsts_in_use Pointer to location to receive HSTS in-use flag
+ * \return NSERROR_OK on success, appropriate error otherwise
+ */
+static nserror llcache_hsts_transform_url(nsurl *url, nsurl **result,
+		bool *hsts_in_use)
+{
+	lwc_string *scheme = NULL;
+	bool match;
+	nserror error = NSERROR_OK;
+
+	scheme = nsurl_get_component(url, NSURL_SCHEME);
+	if (lwc_string_caseless_isequal(scheme, corestring_lwc_http,
+			&match) != lwc_error_ok || match == false) {
+		/* Non-HTTP fetch: ignore */
+		lwc_string_unref(scheme);
+		*result = nsurl_ref(url);
+		*hsts_in_use = false;
+		return error;
+	}
+	lwc_string_unref(scheme);
+
+	if (urldb_get_hsts_enabled(url)) {
+		/* Only need to force HTTPS. If original port was explicitly
+		 * specified as 80, nsurl_create/join will remove it (as
+		 * it's redundant) */
+		error = nsurl_replace_scheme(url, corestring_lwc_https,
+				result);
+		*hsts_in_use = (error == NSERROR_OK);
+	} else {
+		*result = nsurl_ref(url);
+		*hsts_in_use = false;
+	}
+
+	return error;
+}
+
+/**
+ * Update HSTS policy for target domain.
+ *
+ * \param object Newly-fetched cache object
+ * \return NSERROR_OK on success, appropriate error otherwise
+ */
+static nserror llcache_hsts_update_policy(llcache_object *object)
+{
+	size_t i;
+	lwc_string *scheme = NULL;
+	bool match = false;
+
+	scheme = nsurl_get_component(object->url, NSURL_SCHEME);
+	if (lwc_string_caseless_isequal(scheme, corestring_lwc_https,
+			&match) != lwc_error_ok || match == false) {
+		/* Non-HTTPS fetch: ignore */
+		lwc_string_unref(scheme);
+		return NSERROR_OK;
+	}
+	lwc_string_unref(scheme);
+
+	if (object->fetch.tainted_tls) {
+		/* Transport is tainted: ignore */
+		return NSERROR_OK;
+	}
+
+	for (i = 0; i < object->num_headers; i++) {
+		if (strcasecmp("Strict-Transport-Security",
+				object->headers[i].name) == 0) {
+			urldb_set_hsts_policy(object->url,
+					object->headers[i].value);
+			/* Only process the first one we find */
+			break;
+		}
+	}
+
+	return NSERROR_OK;
+}
+
+/**
  * Handle FETCH_REDIRECT event
  *
  * \param object       Object being redirected
@@ -1871,10 +2006,10 @@ static nserror llcache_fetch_redirect(llcache_object *object,
 	llcache_object *dest;
 	llcache_object_user *user, *next;
 	const llcache_post_data *post = object->fetch.post;
-	nsurl *url;
+	nsurl *url, *hsts_url;
 	lwc_string *scheme;
 	lwc_string *object_scheme;
-	bool match;
+	bool match, hsts_in_use;
 	/* Extract HTTP response code from the fetch object */
 	long http_code = fetch_http_code(object->fetch.fetch);
 	llcache_event event;
@@ -1888,6 +2023,8 @@ static nserror llcache_fetch_redirect(llcache_object *object,
 
 	/* And mark it complete */
 	object->fetch.state = LLCACHE_FETCH_COMPLETE;
+
+	(void) llcache_hsts_update_policy(object);
 
 	/* Forcibly stop redirecting if we've followed too many redirects */
 #define REDIRECT_LIMIT 10
@@ -1906,15 +2043,23 @@ static nserror llcache_fetch_redirect(llcache_object *object,
 	if (error != NSERROR_OK)
 		return error;
 
+	/* Perform HSTS transform */
+	error = llcache_hsts_transform_url(url, &hsts_url, &hsts_in_use);
+	if (error != NSERROR_OK) {
+		nsurl_unref(url);
+		return error;
+	}
+	nsurl_unref(url);
+
 	/* Inform users of redirect */
 	event.type = LLCACHE_EVENT_REDIRECT;
 	event.data.redirect.from = object->url;
-	event.data.redirect.to = url;
+	event.data.redirect.to = hsts_url;
 
 	error = llcache_send_event_to_users(object, &event);
 
 	if (error != NSERROR_OK) {
-		nsurl_unref(url);
+		nsurl_unref(hsts_url);
 		return error;
 	}
 
@@ -1922,7 +2067,7 @@ static nserror llcache_fetch_redirect(llcache_object *object,
 	 * A "validated" scheme is one over which we have some guarantee that
 	 * the source is trustworthy. */
 	object_scheme = nsurl_get_component(object->url, NSURL_SCHEME);
-	scheme = nsurl_get_component(url, NSURL_SCHEME);
+	scheme = nsurl_get_component(hsts_url, NSURL_SCHEME);
 
 	/* resource: and about: are allowed to redirect anywhere */
 	if ((lwc_string_isequal(object_scheme, corestring_lwc_resource,
@@ -1938,7 +2083,7 @@ static nserror llcache_fetch_redirect(llcache_object *object,
 				&match) == lwc_error_ok && match == true)) {
 			lwc_string_unref(object_scheme);
 			lwc_string_unref(scheme);
-			nsurl_unref(url);
+			nsurl_unref(hsts_url);
 			return NSERROR_OK;
 		}
 	}
@@ -1947,8 +2092,8 @@ static nserror llcache_fetch_redirect(llcache_object *object,
 	lwc_string_unref(object_scheme);
 
 	/* Bail out if we've no way of handling this URL */
-	if (fetch_can_fetch(url) == false) {
-		nsurl_unref(url);
+	if (fetch_can_fetch(hsts_url) == false) {
+		nsurl_unref(hsts_url);
 		return NSERROR_OK;
 	}
 
@@ -1957,17 +2102,18 @@ static nserror llcache_fetch_redirect(llcache_object *object,
 		post = NULL;
 	} else if (http_code != 307 || post != NULL) {
 		/** \todo 300, 305, 307 with POST */
-		nsurl_unref(url);
+		nsurl_unref(hsts_url);
 		return NSERROR_OK;
 	}
 
 	/* Attempt to fetch target URL */
-	error = llcache_object_retrieve(url, object->fetch.flags,
+	error = llcache_object_retrieve(hsts_url, object->fetch.flags,
 			object->fetch.referer, post,
-			object->fetch.redirect_count + 1, &dest);
+			object->fetch.redirect_count + 1,
+			hsts_in_use, &dest);
 
 	/* No longer require url */
-	nsurl_unref(url);
+	nsurl_unref(hsts_url);
 
 	if (error != NSERROR_OK)
 		return error;
@@ -2058,6 +2204,8 @@ static nserror llcache_fetch_notmodified(llcache_object *object,
 
 	/* Mark it complete */
 	object->fetch.state = LLCACHE_FETCH_COMPLETE;
+
+	(void) llcache_hsts_update_policy(object);
 
 	/* Old object will be flushed from the cache on the next poll */
 
@@ -2253,7 +2401,11 @@ static nserror llcache_fetch_cert_error(llcache_object *object,
 	/* Invalidate cache-control data */
 	llcache_invalidate_cache_control_data(object);
 
-	if (llcache->query_cb != NULL) {
+	/* Consider the TLS transport tainted */
+	object->fetch.tainted_tls = true;
+
+	/* Only give the user a chance if HSTS isn't in use for this fetch */
+	if (object->fetch.hsts_in_use == false && llcache->query_cb != NULL) {
 		llcache_query query;
 
 		/* Emit query for TLS */
@@ -2303,7 +2455,13 @@ static nserror llcache_fetch_ssl_error(llcache_object *object)
 	/* Invalidate cache-control data */
 	llcache_invalidate_cache_control_data(object);
 
-	if (object->fetch.tried_with_tls_downgrade == true) {
+	/* Consider the TLS transport tainted */
+	object->fetch.tainted_tls = true;
+
+	/* Make no attempt to downgrade if HSTS is in use
+	 * (i.e. assume server does TLS properly) */
+	if (object->fetch.hsts_in_use ||
+			object->fetch.tried_with_tls_downgrade) {
 		/* Have already tried to downgrade, so give up */
 		llcache_event event;
 
@@ -2538,9 +2696,10 @@ static void llcache_persist(void *p)
 		total_elapsed += elapsed;
 		total_bandwidth = (total_written * 1000) / total_elapsed;
 
-		NSLOG(llcache, DEBUG, "Wrote %zd bytes in %lums bw:%lu %s",
-		     written, elapsed, (written * 1000) / elapsed,
-		     nsurl_access(lst[idx]->url) );
+		NSLOG(llcache, DEBUG,
+		      "Wrote %"PRIssizet" bytes in %lums bw:%lu %s",
+		      written, elapsed, (written * 1000) / elapsed,
+		      nsurl_access(lst[idx]->url) );
 
 		/* check to for the time quantum or the size
 		 * (bandwidth) for this run being exceeded.
@@ -2605,8 +2764,9 @@ static void llcache_persist(void *p)
 	llcache->total_written += total_written;
 	llcache->total_elapsed += total_elapsed;
 
-	NSLOG(llcache, DEBUG, "writeout size:%zd time:%lu bandwidth:%lubytes/s",
-	     total_written, total_elapsed, total_bandwidth);
+	NSLOG(llcache, DEBUG,
+	      "writeout size:%"PRIssizet" time:%lu bandwidth:%lubytes/s",
+	      total_written, total_elapsed, total_bandwidth);
 
 	NSLOG(llcache, DEBUG, "Rescheduling writeout in %dms", next);
 	guit->misc->schedule(next, llcache_persist, NULL);
@@ -2684,6 +2844,8 @@ static void llcache_fetch_callback(const fetch_msg *msg, void *p)
 		/* record when the fetch finished */
 		object->cache.fin_time = time(NULL);
 
+		(void) llcache_hsts_update_policy(object);
+
 		guit->misc->schedule(5000, llcache_persist, NULL);
 	}
 		break;
@@ -2698,9 +2860,7 @@ static void llcache_fetch_callback(const fetch_msg *msg, void *p)
 			error = llcache_object_refetch(object);
 			break;
 		}
-		/* Otherwise fall through to error, setting the message to
-		 * a timeout
-		 */
+		/* Fall through */
 	case FETCH_ERROR:
 		/* An error occurred while fetching */
 		/* The fetch has has already been cleaned up by the fetcher */
@@ -3273,9 +3433,9 @@ void llcache_clean(bool purge)
 
 			llcache_size -=	object->source_len;
 
-			NSLOG(llcache, DEBUG, "Freeing source data for %p len:%zd",
-				     object,
-				     object->source_len);
+			NSLOG(llcache, DEBUG,
+			      "Freeing source data for %p len:%"PRIssizet,
+			      object, object->source_len);
 		}
 	}
 
@@ -3294,7 +3454,7 @@ void llcache_clean(bool purge)
 		    (object->store_state == LLCACHE_STATE_DISC) &&
 		    (object->source_data == NULL)) {
 			NSLOG(llcache, DEBUG,
-			     "discarding backed object len:%zd age:%ld (%p) %s",
+			     "discarding backed object len:%"PRIssizet" age:%ld (%p) %s",
 			      object->source_len,
 			      (long)(time(NULL) - object->last_used),
 			      object,
@@ -3325,7 +3485,7 @@ void llcache_clean(bool purge)
 		    (object->fetch.outstanding_query == false) &&
 		    (object->store_state == LLCACHE_STATE_RAM)) {
 			NSLOG(llcache, DEBUG,
-			      "discarding fresh object len:%zd age:%ld (%p) %s",
+			      "discarding fresh object len:%"PRIssizet" age:%ld (%p) %s",
 			      object->source_len,
 			      (long)(time(NULL) - object->last_used),
 			      object,
@@ -3446,8 +3606,8 @@ static void llcache_catch_up_all_users(void *ignored)
 	llcache_object *object;
 
 	/* Assume after this we'll be all caught up.  If any user of a handle
-	 * defers then we'll end up set not caught up and we'll
-	 * reschedule at that point via llcache_users_not_caught_up()
+	 * defers then we'll invalidate all_caught_up and reschedule via
+	 * llcache_users_not_caught_up()
 	 */
 	llcache->all_caught_up = true;
 
@@ -3485,23 +3645,35 @@ nserror llcache_handle_retrieve(nsurl *url, uint32_t flags,
 	nserror error;
 	llcache_object_user *user;
 	llcache_object *object;
+	nsurl *hsts_url;
+	bool hsts_in_use;
+
+	/* Perform HSTS transform */
+	error = llcache_hsts_transform_url(url, &hsts_url, &hsts_in_use);
+	if (error != NSERROR_OK) {
+		return error;
+	}
 
 	/* Can we fetch this URL at all? */
-	if (fetch_can_fetch(url) == false) {
+	if (fetch_can_fetch(hsts_url) == false) {
+		nsurl_unref(hsts_url);
 		return NSERROR_NO_FETCH_HANDLER;
 	}
 
 	/* Create a new object user */
 	error = llcache_object_user_new(cb, pw, &user);
 	if (error != NSERROR_OK) {
+		nsurl_unref(hsts_url);
 		return error;
 	}
 
 	/* Retrieve a suitable object from the cache,
 	 * creating a new one if needed. */
-	error = llcache_object_retrieve(url, flags, referer, post, 0, &object);
+	error = llcache_object_retrieve(hsts_url, flags, referer, post, 0,
+			hsts_in_use, &object);
 	if (error != NSERROR_OK) {
 		llcache_object_user_destroy(user);
+		nsurl_unref(hsts_url);
 		return error;
 	}
 
@@ -3512,6 +3684,8 @@ nserror llcache_handle_retrieve(nsurl *url, uint32_t flags,
 
 	/* Users exist which are now not caught up! */
 	llcache_users_not_caught_up();
+
+	nsurl_unref(hsts_url);
 
 	return NSERROR_OK;
 }
@@ -3655,9 +3829,10 @@ nserror llcache_handle_force_stream(llcache_handle *handle)
 /* See llcache.h for documentation */
 nserror llcache_handle_invalidate_cache_data(llcache_handle *handle)
 {
-	if (handle->object != NULL && handle->object->fetch.fetch == NULL &&
-			handle->object->cache.no_cache ==
-				LLCACHE_VALIDATE_FRESH) {
+	if ((handle->object != NULL) &&
+	    (handle->object->fetch.fetch == NULL) &&
+	    (handle->object->cache.no_cache == LLCACHE_VALIDATE_FRESH)) {
+		/* mark the cached object as requiring validation */
 		handle->object->cache.no_cache = LLCACHE_VALIDATE_ONCE;
 	}
 

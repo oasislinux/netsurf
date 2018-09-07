@@ -1141,7 +1141,7 @@ build_entrymap(struct store_state *state)
 {
 	unsigned int eloop;
 
-	NSLOG(netsurf, INFO, "Allocating %ld bytes for max of %d buckets",
+	NSLOG(netsurf, INFO, "Allocating %"PRIsizet" bytes for max of %d buckets",
 	      (1 << state->ident_bits) * sizeof(entry_index_t),
 	      1 << state->ident_bits);
 
@@ -1220,7 +1220,7 @@ read_entries(struct store_state *state)
 	entries_size = (1 << state->entry_bits) * sizeof(struct store_entry);
 
 	NSLOG(netsurf, INFO,
-	      "Allocating %"PRIsizet" bytes for max of %d entries of %ld length elements %ld length",
+	      "Allocating %"PRIsizet" bytes for max of %d entries of %"PRIsizet" length elements %"PRIsizet" length",
 	      entries_size,
 	      1 << state->entry_bits,
 	      sizeof(struct store_entry),
@@ -1565,6 +1565,7 @@ initialise(const struct llcache_store_parameters *parameters)
 	ret = build_entrymap(newstate);
 	if (ret != NSERROR_OK) {
 		/* that obviously went well */
+		free(newstate->entries);
 		free(newstate->path);
 		free(newstate);
 		return ret;
@@ -1573,6 +1574,8 @@ initialise(const struct llcache_store_parameters *parameters)
 	ret = read_blocks(newstate);
 	if (ret != NSERROR_OK) {
 		/* oh dear */
+		free(newstate->addrmap);
+		free(newstate->entries);
 		free(newstate->path);
 		free(newstate);
 		return ret;
@@ -1640,6 +1643,8 @@ finalise(void)
 			      0);
 		}
 
+		free(storestate->addrmap);
+		free(storestate->entries);
 		free(storestate->path);
 		free(storestate);
 		storestate = NULL;

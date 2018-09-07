@@ -5,7 +5,7 @@
 CFLAGS += -std=c99 -Dnsamiga
 
 ifneq ($(SUBTARGET),os3)
-  CFLAGS += -O2 -finline-functions -U__STRICT_ANSI__ -D__USE_INLINE__ -D__USE_BASETYPE__
+  CFLAGS += -O2 -mstrict-align -finline-functions -U__STRICT_ANSI__ -D__USE_INLINE__ -D__USE_BASETYPE__
 else
   CFLAGS += -O2 -DPATH_MAX=1024 -D__m68k__ -m68020
 endif
@@ -67,8 +67,8 @@ package-amiga: netsurf.lha
 
 AMIGA_LANGUAGES := de en it ja nl
 AMIGA_PLATFORM_RESOURCES := Pointers Themes default.css default.css.info favicon.png LangNames mimetypes Resource.map splash.png
-AMIGA_GENERIC_RESOURCES := $(AMIGA_LANGUAGES) ca-bundle Icons
-AMIGA_RESOURCES := $(addprefix $(FRONTEND_SOURCE_DIR)/resources/,$(AMIGA_PLATFORM_RESOURCES)) $(addprefix \!NetSurf/Resources/,$(AMIGA_GENERIC_RESOURCES))
+AMIGA_GENERIC_RESOURCES := $(AMIGA_LANGUAGES) ca-bundle icons
+AMIGA_RESOURCES := $(addprefix $(FRONTEND_SOURCE_DIR)/resources/,$(AMIGA_PLATFORM_RESOURCES)) $(addprefix resources/,$(AMIGA_GENERIC_RESOURCES))
 AMIGA_DISTRIBUTION_FILES := $(FRONTEND_SOURCE_DIR)/dist/*
 AMIGA_PKG_DIR := $(FRONTEND_SOURCE_DIR)/pkg
 AMIGA_INSTALL_TARGET_DIR := NetSurf_Amiga
@@ -80,13 +80,14 @@ netsurf.lha: $(EXETARGET)
 	$(Q)cp -p $(EXETARGET) $(AMIGA_INSTALL_TARGET_DIR)/NetSurf
 	$(Q)$(MKDIR) $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources
 	$(Q)cp -rp $(AMIGA_RESOURCES) $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources
+	$(Q)mv $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources/icons $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources/Icons
 	$(Q)cp -rp $(AMIGA_DISTRIBUTION_FILES) $(AMIGA_INSTALL_TARGET_DIR)/NetSurf
 	$(Q)cat resources/SearchEngines $(AMIGA_PKG_DIR)/SearchEngines >$(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources/SearchEngines
-	$(Q)cp -p \!NetSurf/Resources/AdBlock,f79 $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources/adblock.css
-	$(Q)cp -p \!NetSurf/Resources/CSS,f79 $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources/nsdefault.css
-	$(Q)cp -p \!NetSurf/Resources/internal.css,f79 $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources/internal.css
-	$(Q)cp -p \!NetSurf/Resources/Quirks,f79 $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources/quirks.css
-	$(Q)cp -p \!NetSurf/Resources/netsurf.png,b60 $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources/netsurf.png
+	$(Q)cp -p resources/adblock.css $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources/adblock.css
+	$(Q)cp -p resources/default.css $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources/nsdefault.css
+	$(Q)cp -p resources/internal.css $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources/internal.css
+	$(Q)cp -p resources/quirks.css $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources/quirks.css
+	$(Q)cp -p resources/netsurf.png $(AMIGA_INSTALL_TARGET_DIR)/NetSurf/Resources/netsurf.png
 	$(Q)cp -p $(AMIGA_PKG_DIR)/drawer.info $(AMIGA_INSTALL_TARGET_DIR)/NetSurf.info
 	$(Q)cp -p $(AMIGA_PKG_DIR)/AutoInstall $(AMIGA_INSTALL_TARGET_DIR)
   ifeq ($(SUBTARGET),os3)

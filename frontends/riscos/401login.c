@@ -41,9 +41,13 @@
 
 static void ro_gui_401login_close(wimp_w w);
 static bool ro_gui_401login_apply(wimp_w w);
-static void ro_gui_401login_open(nsurl *url, lwc_string *host,
+static nserror ro_gui_401login_open(nsurl *url, lwc_string *host,
 		const char *realm,
-		nserror (*cb)(bool proceed, void *pw), void *cbpw);
+		const char *username, const char *password,
+		nserror (*cb)(const char *username,
+				const char *password,
+				void *pw),
+		void *cbpw);
 
 static wimp_window *dialog_401_template;
 
@@ -53,7 +57,9 @@ struct session_401 {
 	char uname[256];		/**< Buffer for username */
 	nsurl *url;			/**< URL being fetched */
 	char pwd[256];			/**< Buffer for password */
-	nserror (*cb)(bool proceed, void *pw);	/**< Continuation callback */
+	nserror (*cb)(const char *username,
+			const char *password,
+			void *pw);	/**< Continuation callback */
 	void *cbpw;			/**< Continuation callback data */
 };
 
@@ -71,15 +77,22 @@ void ro_gui_401login_init(void)
 /**
  * Open the login dialog
  */
-void gui_401login_open(nsurl *url, const char *realm,
-		nserror (*cb)(bool proceed, void *pw), void *cbpw)
+nserror gui_401login_open(nsurl *url, const char *realm,
+		const char *username, const char *password,
+		nserror (*cb)(const char *username,
+				const char *password,
+				void *pw),
+		void *cbpw)
 {
+	nserror err;
 	lwc_string *host = nsurl_get_component(url, NSURL_HOST);
 	assert(host != NULL);
 
-	ro_gui_401login_open(url, host, realm, cb, cbpw);
-
+	err = ro_gui_401login_open(url, host, realm, username, password,
+			cb, cbpw);
 	lwc_string_unref(host);
+
+	return err;
 }
 
 
@@ -87,51 +100,50 @@ void gui_401login_open(nsurl *url, const char *realm,
  * Open a 401 login window.
  */
 
-void ro_gui_401login_open(nsurl *url, lwc_string *host, const char *realm,
-		nserror (*cb)(bool proceed, void *pw), void *cbpw)
+nserror ro_gui_401login_open(nsurl *url, lwc_string *host, const char *realm,
+		const char *username, const char *password,
+		nserror (*cb)(const char *username,
+				const char *password,
+				void *pw),
+		void *cbpw)
 {
 	struct session_401 *session;
+	size_t len;
 	wimp_w w;
-	const char *auth;
+
+	assert(host != NULL);
+	assert(username != NULL);
+	assert(password != NULL);
 
 	session = calloc(1, sizeof(struct session_401));
 	if (!session) {
 		ro_warn_user("NoMemory", 0);
-		return;
+		return NSERROR_NOMEM;
 	}
 
-	session->url = nsurl_ref(url);
 	if (realm == NULL)
 		realm = "Secure Area";
-        auth = urldb_get_auth_details(session->url, realm);
-	if (auth == NULL) {
-		session->uname[0] = '\0';
-		session->pwd[0] = '\0';
-	} else {
-		const char *pwd;
-		size_t pwd_len;
 
-		pwd = strchr(auth, ':');
-		assert(pwd && pwd < auth + sizeof(session->uname));
-		memcpy(session->uname, auth, pwd - auth);
-		session->uname[pwd - auth] = '\0';
-		++pwd;
-		pwd_len = strlen(pwd);
-		assert(pwd_len < sizeof(session->pwd));
-		memcpy(session->pwd, pwd, pwd_len);
-		session->pwd[pwd_len] = '\0';
-	}
+	session->url = nsurl_ref(url);
 	session->host = lwc_string_ref(host);
 	session->realm = strdup(realm);
 	session->cb = cb;
 	session->cbpw = cbpw;
+
+	len = strlen(username);
+	assert(len < sizeof(session->uname));
+	memcpy(session->uname, username, len + 1);
+
+	len = strlen(password);
+	assert(len < sizeof(session->pwd));
+	memcpy(session->pwd, password, len + 1);
 
 	if (!session->realm) {
 		nsurl_unref(session->url);
 		lwc_string_unref(session->host);
 		free(session);
 		ro_warn_user("NoMemory", 0);
-		return;
+		return NSERROR_NOMEM;
 	}
 
 	/* fill in download window icons */
@@ -166,6 +178,8 @@ void ro_gui_401login_open(nsurl *url, lwc_string *host, const char *realm,
 	ro_gui_wimp_event_set_user_data(w, session);
 
 	ro_gui_dialog_open_persistent(NULL, w, false);
+
+	return NSERROR_OK;
 }
 
 /**
@@ -182,7 +196,7 @@ void ro_gui_401login_close(wimp_w w)
 
 	/* If ok didn't happen, send failure response */
 	if (session->cb != NULL)
-		session->cb(false, session->cbpw);
+		session->cb(NULL, NULL, session->cbpw);
 
 	nsurl_unref(session->url);
 	lwc_string_unref(session->host);
@@ -205,26 +219,12 @@ void ro_gui_401login_close(wimp_w w)
 bool ro_gui_401login_apply(wimp_w w)
 {
 	struct session_401 *session;
-	char *auth;
 
 	session = (struct session_401 *)ro_gui_wimp_event_get_user_data(w);
 
 	assert(session);
 
-	auth = malloc(strlen(session->uname) + strlen(session->pwd) + 2);
-	if (!auth) {
-		NSLOG(netsurf, INFO, "calloc failed");
-		ro_warn_user("NoMemory", 0);
-		return false;
-	}
-
-	sprintf(auth, "%s:%s", session->uname, session->pwd);
-
-	urldb_set_auth_details(session->url, session->realm, auth);
-
-	free(auth);
-
-	session->cb(true, session->cbpw);
+	session->cb(session->uname, session->pwd, session->cbpw);
 
 	/* Flag that we sent response by invalidating callback details */
 	session->cb = NULL;

@@ -71,7 +71,7 @@ fb_text_font_style(fbtk_widget_t *widget, int *font_height, int *padding,
 #endif
 
 	font_style->family = PLOT_FONT_FAMILY_SANS_SERIF;
-	font_style->size = px_to_pt(*font_height * FONT_SIZE_SCALE);
+	font_style->size = px_to_pt(*font_height * PLOT_STYLE_SCALE);
 	font_style->weight = 400;
 	font_style->flags = FONTF_NONE;
 	font_style->background = widget->bg;
@@ -383,6 +383,22 @@ text_input(fbtk_widget_t *widget, fbtk_callback_info *cbi)
 				widget->u.text.idx--;
 			else
 				widget->u.text.idx = 0;
+
+			caret_moved = true;
+		}
+		break;
+
+	case NSFB_KEY_HOME:
+		if (widget->u.text.idx > 0) {
+			widget->u.text.idx = 0;
+
+			caret_moved = true;
+		}
+		break;
+
+	case NSFB_KEY_END:
+		if (widget->u.text.idx < widget->u.text.len) {
+			widget->u.text.idx = widget->u.text.len;
 
 			caret_moved = true;
 		}
