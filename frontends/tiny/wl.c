@@ -836,6 +836,8 @@ platform_init(void)
 		goto err6;
 	}
 
+	browser_set_dpi(TINY_DPI);
+
 	return NSERROR_OK;
 
 err7:

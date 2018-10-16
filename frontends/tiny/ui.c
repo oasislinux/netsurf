@@ -23,6 +23,7 @@
 #include <pixman.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include "css/utils.h"
 #include "utils/log.h"
 #include "utils/nsoption.h"
 #include "utils/nsurl.h"
@@ -47,8 +48,10 @@
 #include "tiny/render.h"
 
 #define ICON_SIZE 24
-#define TOOLBAR_HEIGHT ICON_SIZE
-#define STATUS_HEIGHT 16
+#define TOOLBAR_FONT_SIZE 10
+#define TOOLBAR_HEIGHT max(ICON_SIZE, FIXTOINT(FDIV(FMUL(nscss_screen_dpi, FDIV(INTTOFIX(TOOLBAR_FONT_SIZE + 4), PLOT_STYLE_SCALE)), F_72)))
+#define STATUS_FONT_SIZE 8
+#define STATUS_HEIGHT FIXTOINT(FDIV(FMUL(nscss_screen_dpi, FDIV(INTTOFIX(STATUS_FONT_SIZE + 3), PLOT_STYLE_SCALE)), F_72))
 #define SEARCH_WIDTH 200
 #define SEARCH_HEIGHT ICON_SIZE
 
@@ -344,7 +347,7 @@ buttons_redraw(struct gui_window *g, struct element *e, struct rect *clip, const
 	};
 	struct bitmap *b;
 	bool back, forward;
-	int x;
+	int x, y;
 
 	ctx->plot->clip(NULL, clip);
 	ctx->plot->rectangle(NULL, &style, &e->r);
@@ -352,13 +355,14 @@ buttons_redraw(struct gui_window *g, struct element *e, struct rect *clip, const
 	forward = browser_window_history_forward_available(g->bw);
 
 	x = e->r.x0;
-	ploticon(tiny_icons[ICON_BACK], x, e->r.y0, back);
+	y = e->r.y0 + (TOOLBAR_HEIGHT - ICON_SIZE) / 2;
+	ploticon(tiny_icons[ICON_BACK], x, y, back);
 	x += ICON_SIZE;
-	ploticon(tiny_icons[ICON_FORWARD], x, e->r.y0, forward);
+	ploticon(tiny_icons[ICON_FORWARD], x, y, forward);
 	x += ICON_SIZE;
-	ploticon(tiny_icons[g->throbbing ? ICON_STOP : ICON_HOME], x, e->r.y0, true);
+	ploticon(tiny_icons[g->throbbing ? ICON_STOP : ICON_HOME], x, y, true);
 	x += ICON_SIZE;
-	ploticon(tiny_icons[ICON_RELOAD], x, e->r.y0, true);
+	ploticon(tiny_icons[ICON_RELOAD], x, y, true);
 
 	ctx->plot->line(NULL, &style, &(struct rect){e->r.x0, e->r.y1 - 1, e->r.x1, e->r.y1 - 1});
 }
@@ -719,7 +723,7 @@ window_create(struct browser_window *bw, struct gui_window *existing, gui_window
 		.border_width = 1,
 		.text = {
 			.family = PLOT_FONT_FAMILY_SANS_SERIF,
-			.size = 12 * PLOT_STYLE_SCALE,
+			.size = TOOLBAR_FONT_SIZE * PLOT_STYLE_SCALE,
 			.weight = 400,
 		},
 	};
