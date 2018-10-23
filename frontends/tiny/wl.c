@@ -32,7 +32,7 @@
 #include <pixman.h>
 #include <wayland-client.h>
 #include <wayland-cursor.h>
-#include <xdg-shell-unstable-v5-client-protocol.h>
+#include <xdg-shell-client-protocol.h>
 #include <xkbcommon/xkbcommon.h>
 
 #include "utils/log.h"
@@ -93,7 +93,7 @@ struct wlstate {
 	struct wl_pointer *pointer;
 	struct wl_data_device_manager *datadevicemanager;
 	struct wl_data_device *datadevice;
-	struct xdg_shell *shell;
+	struct xdg_wm_base *wm;
 
 	uint32_t lastserial;
 
@@ -134,6 +134,7 @@ struct platform_window {
 	struct wl_surface *surface;
 	struct wlimage *image;
 	struct xdg_surface *xdg_surface;
+	struct xdg_toplevel *toplevel;
 
 	struct {
 		wl_fixed_t x, y;
@@ -218,8 +219,8 @@ registry_global(void *data, struct wl_registry *reg, uint32_t name, const char *
 		wl->shm = wl_registry_bind(reg, name, &wl_shm_interface, MIN(version, 1));
 	} else if (strcmp(interface, "wl_data_device_manager") == 0) {
 		wl->datadevicemanager = wl_registry_bind(reg, name, &wl_data_device_manager_interface, MIN(version, 2));
-	} else if (strcmp(interface, "xdg_shell") == 0) {
-		wl->shell = wl_registry_bind(reg, name, &xdg_shell_interface, MIN(version, 1));
+	} else if (strcmp(interface, "xdg_wm_base") == 0) {
+		wl->wm = wl_registry_bind(reg, name, &xdg_wm_base_interface, MIN(version, 1));
 	}
 }
 
@@ -468,13 +469,13 @@ static struct wl_seat_listener seat_listener = {
 };
 
 static void
-shell_ping(void *data, struct xdg_shell *shell, uint32_t serial)
+wm_base_ping(void *data, struct xdg_wm_base *wm, uint32_t serial)
 {
-	xdg_shell_pong(shell, serial);
+	xdg_wm_base_pong(wm, serial);
 }
 
-static const struct xdg_shell_listener shell_listener = {
-	.ping = shell_ping,
+static const struct xdg_wm_base_listener wm_base_listener = {
+	.ping = wm_base_ping,
 };
 
 static void
@@ -724,7 +725,20 @@ resize(void *data)
 }
 
 static void
-xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, int32_t width, int32_t height, struct wl_array *states, uint32_t serial)
+xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, uint32_t serial)
+{
+	struct platform_window *p = data;
+
+	xdg_surface_ack_configure(xdg_surface, serial);
+	tiny_schedule(0, resize, p);
+}
+
+static struct xdg_surface_listener xdg_surface_listener = {
+	.configure = xdg_surface_configure,
+};
+
+static void
+xdg_toplevel_configure(void *data, struct xdg_toplevel *toplevel, int32_t width, int32_t height, struct wl_array *states)
 {
 	struct platform_window *p = data;
 
@@ -732,22 +746,19 @@ xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, int32_t width
 		p->nextwidth = width;
 	if (height)
 		p->nextheight = height;
-	xdg_surface_ack_configure(xdg_surface, serial);
-
-	tiny_schedule(0, resize, p);
 }
 
 static void
-xdg_surface_close(void *data, struct xdg_surface *xdg_surface)
+xdg_toplevel_close(void *data, struct xdg_toplevel *toplevel)
 {
 	struct platform_window *p = data;
 
 	gui_window_destroy(p->g);
 }
 
-static struct xdg_surface_listener xdg_surface_listener = {
-	.configure = xdg_surface_configure,
-	.close = xdg_surface_close,
+static struct xdg_toplevel_listener toplevel_listener = {
+	.configure = xdg_toplevel_configure,
+	.close = xdg_toplevel_close,
 };
 
 static void
@@ -809,7 +820,7 @@ platform_init(void)
 
 	wl_display_roundtrip(wl->display);
 
-	if (!wl->compositor || !wl->seat || !wl->shm || !wl->shell) {
+	if (!wl->compositor || !wl->seat || !wl->shm || !wl->wm) {
 		NSLOG(netsurf, ERROR, "display is missing required globals");
 		err = NSERROR_INIT_FAILED;
 		goto err5;
@@ -822,8 +833,7 @@ platform_init(void)
 	}
 
 	wl_seat_add_listener(wl->seat, &seat_listener, NULL);
-	xdg_shell_use_unstable_version(wl->shell, XDG_SHELL_VERSION_CURRENT);
-	xdg_shell_add_listener(wl->shell, &shell_listener, NULL);
+	xdg_wm_base_add_listener(wl->wm, &wm_base_listener, NULL);
 
 	wl->cursor.theme = wl_cursor_theme_load(NULL, 32, wl->shm);
 	if (!wl->cursor.theme) {
@@ -851,8 +861,8 @@ err5:
 		wl_seat_destroy(wl->seat);
 	if (wl->shm)
 		wl_shm_destroy(wl->shm);
-	if (wl->shell)
-		xdg_shell_destroy(wl->shell);
+	if (wl->wm)
+		xdg_wm_base_destroy(wl->wm);
 	if (wl->datadevicemanager)
 		wl_data_device_manager_destroy(wl->datadevicemanager);
 	if (wl->datadevice)
@@ -904,7 +914,7 @@ platform_window_create(struct gui_window *g)
 
 	p = malloc(sizeof(*p));
 	if (!p)
-		return NULL;
+		goto err0;
 	p->g = g;
 	p->nextwidth = 800;
 	p->nextheight = 600;
@@ -912,12 +922,16 @@ platform_window_create(struct gui_window *g)
 	p->frame = NULL;
 	p->surface = wl_compositor_create_surface(wl->compositor);
 	if (!p->surface)
-		return NULL;
+		goto err1;
 	wl_surface_set_user_data(p->surface, p);
-	p->xdg_surface = xdg_shell_get_xdg_surface(wl->shell, p->surface);
+	p->xdg_surface = xdg_wm_base_get_xdg_surface(wl->wm, p->surface);
 	if (!p->xdg_surface)
-		return NULL;
+		goto err2;
 	xdg_surface_add_listener(p->xdg_surface, &xdg_surface_listener, p);
+	p->toplevel = xdg_surface_get_toplevel(p->xdg_surface);
+	if (!p->toplevel)
+		goto err3;
+	xdg_toplevel_add_listener(p->toplevel, &toplevel_listener, p);
 
 	wl_display_roundtrip(wl->display);
 
@@ -927,6 +941,15 @@ platform_window_create(struct gui_window *g)
 	tiny_schedule(0, resize, p);
 
 	return p;
+
+err3:
+	xdg_surface_destroy(p->xdg_surface);
+err2:
+	wl_surface_destroy(p->surface);
+err1:
+	free(p);
+err0:
+	return NULL;
 }
 
 void
@@ -967,7 +990,7 @@ platform_window_get_mods(struct platform_window *p)
 void
 platform_window_set_title(struct platform_window *p, const char *title)
 {
-	xdg_surface_set_title(p->xdg_surface, title);
+	xdg_toplevel_set_title(p->toplevel, title);
 }
 
 void
