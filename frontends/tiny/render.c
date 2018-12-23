@@ -920,7 +920,7 @@ err0:
 }
 
 static nserror
-plot_path(const struct redraw_context *ctx, const plot_style_t *style, const float *p, unsigned int n, float width, const float transform[6])
+plot_path(const struct redraw_context *ctx, const plot_style_t *style, const float *p, unsigned int n, const float transform[6])
 {
 	FT_Outline outline = {.flags = FT_OUTLINE_OWNER};
 	FT_Stroker stroker = NULL;
@@ -996,7 +996,7 @@ plot_path(const struct redraw_context *ctx, const plot_style_t *style, const flo
 		err = fterror(FT_Stroker_New(library, &stroker));
 		if (err)
 			goto err;
-		FT_Stroker_Set(stroker, width * 32, FT_STROKER_LINECAP_BUTT, FT_STROKER_LINEJOIN_BEVEL, 0);
+		FT_Stroker_Set(stroker, plot_style_fixed_to_float(style->stroke_width) * 32, FT_STROKER_LINECAP_BUTT, FT_STROKER_LINEJOIN_BEVEL, 0);
 		/* Ugh, if we could specify closed in FT_Stroker_EndSubPath, we
 		   wouldn't have to do this extra traversal and allocation. */
 		if (!outline.tags) {
