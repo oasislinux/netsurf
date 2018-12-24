@@ -150,7 +150,7 @@ NSOPTION_STRING(homepage_url, NULL)
 NSOPTION_BOOL(search_url_bar, false)
 
 /** default web search provider */
-NSOPTION_INTEGER(search_provider, 0)
+NSOPTION_INTEGER(search_provider, 18)
 
 /** URL completion in url bar */
 NSOPTION_BOOL(url_suggestion, true)
