@@ -189,6 +189,7 @@ main(int argc, char *argv[])
 		die("failed to initialize web search\n");
 
 	urldb_load_cookies(nsoption_charp(cookie_file));
+	search_web_select_provider(nsoption_int(search_provider));
 
 	err = icons_init();
 	if (err != NSERROR_OK)
