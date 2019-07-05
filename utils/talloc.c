@@ -55,7 +55,7 @@
 #include "replace.h"
 #else
 #include <stdarg.h>
-#if !defined(__BEOS__) && __GNUC__ > 2
+#if !defined(__BEOS__) && (__GNUC__ > 2 || __STDC_VERSION__ > 199901L)
 /* Assume we've got va_copy */
 #define HAVE_VA_COPY
 #include <string.h>
