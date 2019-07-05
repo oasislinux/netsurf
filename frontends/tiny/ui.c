@@ -656,7 +656,7 @@ search_key(struct gui_window *g, struct element *e, uint32_t key)
 	case '\r':
 		browser_window_search(g->bw, g, SEARCH_FLAG_FORWARDS, g->search.text);
 		break;
-	case '\e':
+	case '\033':
 		setkbdfocus(g, UI_CONTENT);
 		break;
 	default:
