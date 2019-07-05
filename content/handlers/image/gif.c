@@ -451,4 +451,4 @@ static const char *nsgif_types[] = {
 	"image/gif"
 };
 
-CONTENT_FACTORY_REGISTER_TYPES(nsgif, nsgif_types, nsgif_content_handler);
+CONTENT_FACTORY_REGISTER_TYPES(nsgif, nsgif_types, nsgif_content_handler)

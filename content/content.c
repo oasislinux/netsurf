@@ -1400,7 +1400,7 @@ struct content *content_clone(struct content *c)
 		return NULL;
 
 	return nc;
-};
+}
 
 /**
  * Clone a content's data members

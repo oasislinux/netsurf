@@ -359,6 +359,4 @@ static const char *svg_types[] = {
 };
 
 
-CONTENT_FACTORY_REGISTER_TYPES(svg, svg_types, svg_content_handler);
-
-
+CONTENT_FACTORY_REGISTER_TYPES(svg, svg_types, svg_content_handler)

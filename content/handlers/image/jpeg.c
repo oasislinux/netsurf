@@ -416,4 +416,4 @@ static const char *nsjpeg_types[] = {
 	"image/pjpeg"
 };
 
-CONTENT_FACTORY_REGISTER_TYPES(nsjpeg, nsjpeg_types, nsjpeg_content_handler);
+CONTENT_FACTORY_REGISTER_TYPES(nsjpeg, nsjpeg_types, nsjpeg_content_handler)

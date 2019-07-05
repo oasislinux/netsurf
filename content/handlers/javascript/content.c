@@ -117,4 +117,4 @@ static const char *javascript_types[] = {
 	"text/ecmascript", /* common usage */
 };
 
-CONTENT_FACTORY_REGISTER_TYPES(javascript, javascript_types, javascript_content_handler);
+CONTENT_FACTORY_REGISTER_TYPES(javascript, javascript_types, javascript_content_handler)

@@ -286,4 +286,4 @@ static const char *nsbmp_types[] = {
 	"image/x-xbitmap"
 };
 
-CONTENT_FACTORY_REGISTER_TYPES(nsbmp, nsbmp_types, nsbmp_content_handler);
+CONTENT_FACTORY_REGISTER_TYPES(nsbmp, nsbmp_types, nsbmp_content_handler)

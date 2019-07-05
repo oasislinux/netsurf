@@ -294,4 +294,4 @@ static const char *nsico_types[] = {
 	"image/x-icon"
 };
 
-CONTENT_FACTORY_REGISTER_TYPES(nsico, nsico_types, nsico_content_handler);
+CONTENT_FACTORY_REGISTER_TYPES(nsico, nsico_types, nsico_content_handler)

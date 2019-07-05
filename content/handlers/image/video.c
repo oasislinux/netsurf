@@ -197,6 +197,4 @@ static const char *nsvideo_types[] = {
 	"video/webm"
 };
 
-CONTENT_FACTORY_REGISTER_TYPES(nsvideo, nsvideo_types, 
-		nsvideo_content_handler);
-
+CONTENT_FACTORY_REGISTER_TYPES(nsvideo, nsvideo_types, nsvideo_content_handler)

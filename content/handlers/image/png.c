@@ -609,4 +609,4 @@ static const char *nspng_types[] = {
 	"image/x-png"
 };
 
-CONTENT_FACTORY_REGISTER_TYPES(nspng, nspng_types, nspng_content_handler);
+CONTENT_FACTORY_REGISTER_TYPES(nspng, nspng_types, nspng_content_handler)

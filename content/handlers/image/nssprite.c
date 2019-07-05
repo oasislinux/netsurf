@@ -272,4 +272,4 @@ static const char *nssprite_types[] = {
 	"image/x-riscos-sprite"
 };
 
-CONTENT_FACTORY_REGISTER_TYPES(nssprite, nssprite_types, nssprite_content_handler);
+CONTENT_FACTORY_REGISTER_TYPES(nssprite, nssprite_types, nssprite_content_handler)
