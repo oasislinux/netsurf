@@ -433,8 +433,8 @@ nserror treeview_contract(treeview *tree, bool all);
  * \param clip		Current clip rectangle (wrt tree origin)
  * \param ctx		Current redraw context
  */
-void treeview_redraw(treeview *tree, const int x, const int y,
-		     struct rect *clip, const struct redraw_context *ctx);
+void treeview_redraw(treeview *tree, int x, int y, struct rect *clip,
+		     const struct redraw_context *ctx);
 
 
 /**
