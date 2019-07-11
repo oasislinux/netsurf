@@ -850,8 +850,6 @@ platform_init(void)
 
 	return NSERROR_OK;
 
-err7:
-	wl_surface_destroy(wl->cursor.surface);
 err6:
 	wl_cursor_theme_destroy(wl->cursor.theme);
 err5:
