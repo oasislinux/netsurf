@@ -647,6 +647,7 @@ ploticon(struct bitmap *bitmap, int x, int y, bool active)
 	w = pixman_image_get_width(image);
 	h = pixman_image_get_height(image);
 	pixman_image_composite32(PIXMAN_OP_OVER, image, active ? NULL : iconmask, target, 0, 0, 0, 0, x, y, w, h);
+	return NSERROR_OK;
 }
 
 // TODO: utilize redraw_context
