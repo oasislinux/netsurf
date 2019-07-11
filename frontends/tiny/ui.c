@@ -288,7 +288,7 @@ navigate(struct gui_window *g)
 	text = textarea_data(g->url, &len);
 	if (!text)
 		return;
-	if (strchr(text, '.') || len > 1 && text[len - 2] == '/') {
+	if (strchr(text, '.') || (len > 1 && text[len - 2] == '/')) {
 		err = nsurl_create(text, &url);
 	} else {
 		err = NSERROR_BAD_URL;

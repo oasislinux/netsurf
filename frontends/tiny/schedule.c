@@ -97,7 +97,7 @@ schedule_run(void)
 		pending = NULL;
 		for (last = &schedule_list; *last;) {
 			cb = *last;
-			if (now.tv_sec > cb->t.tv_sec || now.tv_sec == cb->t.tv_sec && now.tv_nsec >= cb->t.tv_nsec) {
+			if (now.tv_sec > cb->t.tv_sec || (now.tv_sec == cb->t.tv_sec && now.tv_nsec >= cb->t.tv_nsec)) {
 				*last = cb->next;
 				cb->next = pending;
 				pending = cb;
