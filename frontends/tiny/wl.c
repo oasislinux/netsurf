@@ -422,6 +422,8 @@ pointer_button(void *data, struct wl_pointer *pointer, uint32_t serial, uint32_t
 	case BTN_RIGHT:
 		b = 3;
 		break;
+	default:
+		return;
 	}
 
 	gui_window_button(p->g, time, b, state == WL_POINTER_BUTTON_STATE_PRESSED);
