@@ -80,10 +80,18 @@
 #define APPNOTIFY_StopBackMsg   ( TAG_USER + 17 )
 #endif
 
+enum {
+	OID_D_MAIN = 0,
+	GID_D_MAIN,
+	GID_D_STATUS,
+	GID_D_CANCEL,
+	GID_D_LAST
+};
+
 struct gui_download_window {
 	struct ami_generic_window w;
 	struct Window *win;
-	Object *objects[GID_LAST];
+	Object *objects[GID_D_LAST];
 	BPTR fh;
 	uint32 size;
 	uint32 downloaded;
@@ -124,8 +132,8 @@ static struct gui_download_window *gui_download_window_create(download_context *
 
 	dw = calloc(1, sizeof(struct gui_download_window));
 
-	if(gui && (!IsListEmpty(&gui->dllist)) && (dw->dln = (struct dlnode *)FindName(&gui->dllist,url)))
-	{
+	if(gui && (!IsListEmpty(ami_gui_get_download_list(gui)) &&
+		(dw->dln = (struct dlnode *)FindName(ami_gui_get_download_list(gui), url)))) {
 		strcpy(dw->fname, dw->dln->filename);
 		free(dw->dln->node.ln_Name);
 		dw->dln->node.ln_Name = NULL;
@@ -133,16 +141,16 @@ static struct gui_download_window *gui_download_window_create(download_context *
 	else
 	{
 		if(AslRequestTags(savereq,
-			ASLFR_Window, gui->shared->win,
+			ASLFR_Window, ami_gui_get_window(gui),
 			ASLFR_SleepWindow, TRUE,
 			ASLFR_TitleText, messages_get("NetSurf"),
-			ASLFR_Screen, scrn,
+			ASLFR_Screen, ami_gui_get_screen(),
 			ASLFR_InitialFile, dl_filename,
 			TAG_DONE))
 		{
 			strlcpy(dw->fname, savereq->fr_Drawer, 1024);
 			AddPart((STRPTR)&dw->fname,savereq->fr_File,1024);
-			if(!ami_download_check_overwrite(dw->fname, gui->shared->win, total_size))
+			if(!ami_download_check_overwrite(dw->fname, ami_gui_get_window(gui), total_size))
 			{
 				free(dw);
 				return NULL;
@@ -158,7 +166,7 @@ static struct gui_download_window *gui_download_window_create(download_context *
 	if(dl_filename) ami_utf8_free(dl_filename);
 	dw->size = total_size;
 	dw->downloaded = 0;
-	if(gui) dw->bw = gui->bw;
+	if(gui) dw->bw = ami_gui_get_browser_window(gui);
 	dw->url = url;
 
 	va[0] = (APTR)dw->downloaded;
@@ -183,7 +191,7 @@ static struct gui_download_window *gui_download_window_create(download_context *
 				APPNOTIFY_StopBackMsg, bkm,
 				TAG_DONE);
 	} else {
-		dw->objects[OID_MAIN] = WindowObj,
+		dw->objects[OID_D_MAIN] = WindowObj,
       	    WA_ScreenTitle, ami_gui_get_screen_title(),
            	WA_Title, dw->url,
            	WA_Activate, TRUE,
@@ -191,15 +199,15 @@ static struct gui_download_window *gui_download_window_create(download_context *
            	WA_DragBar, TRUE,
            	WA_CloseGadget, FALSE,
            	WA_SizeGadget, TRUE,
-			WA_PubScreen,scrn,
-			WINDOW_SharedPort,sport,
+			WA_PubScreen, ami_gui_get_screen(),
+			WINDOW_SharedPort, ami_gui_get_shared_msgport(),
 			WINDOW_UserData,dw,
 			WINDOW_IconifyGadget, FALSE,
 			WINDOW_LockHeight,TRUE,
          	WINDOW_Position, WPOS_CENTERSCREEN,
-           	WINDOW_ParentGroup, dw->objects[GID_MAIN] = LayoutVObj,
-				LAYOUT_AddChild, dw->objects[GID_STATUS] = FuelGaugeObj,
-					GA_ID,GID_STATUS,
+           	WINDOW_ParentGroup, dw->objects[GID_D_MAIN] = LayoutVObj,
+				LAYOUT_AddChild, dw->objects[GID_D_STATUS] = FuelGaugeObj,
+					GA_ID,GID_D_STATUS,
 					GA_Text,messages_get("amiDownload"),
 					FUELGAUGE_Min,0,
 					FUELGAUGE_Max,total_size,
@@ -212,8 +220,8 @@ static struct gui_download_window *gui_download_window_create(download_context *
 				FuelGaugeEnd,
 				CHILD_NominalSize,TRUE,
 				CHILD_WeightedHeight,0,
-				LAYOUT_AddChild, dw->objects[GID_CANCEL] = ButtonObj,
-					GA_ID,GID_CANCEL,
+				LAYOUT_AddChild, dw->objects[GID_D_CANCEL] = ButtonObj,
+					GA_ID,GID_D_CANCEL,
 					GA_RelVerify,TRUE,
 					GA_Text,messages_get("Abort"),
 					GA_TabCycle,TRUE,
@@ -221,7 +229,7 @@ static struct gui_download_window *gui_download_window_create(download_context *
 			EndGroup,
 		EndWindow;
 
-		dw->win = (struct Window *)RA_OpenWindow(dw->objects[OID_MAIN]);
+		dw->win = (struct Window *)RA_OpenWindow(dw->objects[OID_D_MAIN]);
 	}
 
 	dw->ctx = ctx;
@@ -256,7 +264,7 @@ static nserror gui_download_window_data(struct gui_download_window *dw,
 					APPNOTIFY_Percentage, dw->progress,
 					TAG_DONE);
 		} else {
-			RefreshSetGadgetAttrs((struct Gadget *)dw->objects[GID_STATUS], dw->win, NULL,
+			RefreshSetGadgetAttrs((struct Gadget *)dw->objects[GID_D_STATUS], dw->win, NULL,
 						FUELGAUGE_Level,   dw->downloaded,
 						GA_Text,           messages_get("amiDownload"),
 						FUELGAUGE_VarArgs, va,
@@ -271,7 +279,7 @@ static nserror gui_download_window_data(struct gui_download_window *dw,
 					APPNOTIFY_Percentage, 100,
 					TAG_DONE);
 		} else {
-			RefreshSetGadgetAttrs((struct Gadget *)dw->objects[GID_STATUS], dw->win, NULL,
+			RefreshSetGadgetAttrs((struct Gadget *)dw->objects[GID_D_STATUS], dw->win, NULL,
 						FUELGAUGE_Level,   dw->downloaded,
 						GA_Text,           messages_get("amiDownloadU"),
 						FUELGAUGE_VarArgs, va,
@@ -330,8 +338,8 @@ static void gui_download_window_done(struct gui_download_window *dw)
 
 	downloads_in_progress--;
 
-	if(dw->objects[OID_MAIN] != NULL) {
-		DisposeObject(dw->objects[OID_MAIN]);
+	if(dw->objects[OID_D_MAIN] != NULL) {
+		DisposeObject(dw->objects[OID_D_MAIN]);
 	}
 
 	ami_gui_win_list_remove(dw);
@@ -378,14 +386,14 @@ static BOOL ami_download_window_event(void *w)
 
 	if(dw == NULL) return FALSE; /* We may not have a real window */
 
-	while((result = RA_HandleInput(dw->objects[OID_MAIN], &code)) != WMHI_LASTMSG)
+	while((result = RA_HandleInput(dw->objects[OID_D_MAIN], &code)) != WMHI_LASTMSG)
 	{
        	switch(result & WMHI_CLASSMASK) // class
 		{
 			case WMHI_GADGETUP:
 				switch(result & WMHI_GADGETMASK)
 				{
-					case GID_CANCEL:
+					case GID_D_CANCEL:
 						ami_download_window_abort(dw);
 						return TRUE;
 					break;
@@ -426,19 +434,19 @@ gui_window_save_link(struct gui_window *g, nsurl *url, const char *title)
 	linkname = ASPrintf("Link_to_%s",FilePart(nsurl_access(url)));
 
 	if(AslRequestTags(savereq,
-		ASLFR_Window, g->shared->win,
+		ASLFR_Window, ami_gui_get_window(g),
 		ASLFR_SleepWindow, TRUE,
 		ASLFR_TitleText,messages_get("NetSurf"),
-		ASLFR_Screen,scrn,
-		ASLFR_InitialFile,linkname,
+		ASLFR_Screen, ami_gui_get_screen(),
+		ASLFR_InitialFile, linkname,
 		TAG_DONE))
 	{
 		strlcpy(fname, savereq->fr_Drawer, 1024);
 		AddPart(fname,savereq->fr_File,1024);
 
-		ami_set_pointer(g->shared, GUI_POINTER_WAIT, false);
+		ami_set_pointer(ami_gui_get_gui_window_2(g), GUI_POINTER_WAIT, false);
 
-		if(ami_download_check_overwrite(fname, g->shared->win, 0))
+		if(ami_download_check_overwrite(fname, ami_gui_get_window(g), 0))
 		{
 			BPTR fh;
 
@@ -465,7 +473,7 @@ gui_window_save_link(struct gui_window *g, nsurl *url, const char *title)
 			}
 			FreeVec(linkname);
 		}
-		ami_reset_pointer(g->shared);
+		ami_reset_pointer(ami_gui_get_gui_window_2(g));
 	}
 	return NSERROR_OK;
 }

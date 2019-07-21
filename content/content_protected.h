@@ -17,8 +17,9 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/** \file
- * Content handling (interface).
+/**
+ * \file
+ * Protected interface to Content handling.
  *
  * The content functions manipulate struct contents, which correspond to URLs.
  */
@@ -59,9 +60,9 @@ struct content_handler {
 	bool (*redraw)(struct content *c, struct content_redraw_data *data,
 			const struct rect *clip,
 			const struct redraw_context *ctx);
-	void (*open)(struct content *c, struct browser_window *bw,
+	nserror (*open)(struct content *c, struct browser_window *bw,
 			struct content *page, struct object_params *params);
-	void (*close)(struct content *c);
+	nserror (*close)(struct content *c);
 	void (*clear_selection)(struct content *c);
 	char * (*get_selection)(struct content *c);
 	nserror (*get_contextual_content)(struct content *c, int x, int y,
@@ -81,6 +82,7 @@ struct content_handler {
 	content_type (*type)(void);
 	void (*add_user)(struct content *c);
 	void (*remove_user)(struct content *c);
+	bool (*exec)(struct content *c, const char *src, size_t srclen);
 
         /** handler dependant content sensitive internal data interface. */
 	void * (*get_internal)(const struct content *c, void *context);
@@ -113,7 +115,8 @@ struct content {
 	content_status status;	/**< Current status. */
 
 	int width, height;	/**< Dimensions, if applicable. */
-	int available_width;	/**< Available width (eg window width). */
+	int available_width;	/**< Viewport width. */
+	int available_height;	/**< Viewport height. */
 
 	bool quirks;		/**< Content is in quirks mode */
 	char *fallback_charset;	/**< Fallback charset, or NULL */
@@ -253,7 +256,7 @@ int content__get_available_width(struct content *c);
  * \param size Pointer to location to receive byte size of source.
  * \return Pointer to source data.
  */
-const char *content__get_source_data(struct content *c, unsigned long *size);
+const uint8_t *content__get_source_data(struct content *c, size_t *size);
 
 /**
  * Invalidate content reuse data.

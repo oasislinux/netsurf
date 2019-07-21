@@ -137,6 +137,7 @@ PERL=perl
 MKDIR=mkdir
 TOUCH=touch
 STRIP?=strip
+INSTALL?=install
 SPLIT_MESSAGES=$(PERL) utils/split-messages.pl
 
 # build verbosity
@@ -148,7 +149,7 @@ endif
 VQ=@
 
 # Override this only if the host compiler is called something different
-HOST_CC := gcc
+BUILD_CC := cc
 
 ifeq ($(TARGET),riscos)
   ifeq ($(HOST),riscos)
@@ -319,11 +320,11 @@ else
 endif
 
 # compiler versioning to adjust warning flags
-CC_VERSION := $(shell $(CC) -dumpversion)
+CC_VERSION := $(shell $(CC) -dumpfullversion -dumpversion)
 CC_MAJOR := $(word 1,$(subst ., ,$(CC_VERSION)))
 CC_MINOR := $(word 2,$(subst ., ,$(CC_VERSION)))
 define cc_ver_ge
-$(shell expr $(CC_MAJOR) \>= $(1) \& $(CC_MINOR) \>= $(2))
+$(shell expr $(CC_MAJOR) \> $(1) \| \( $(CC_MAJOR) = $(1) \& $(CC_MINOR) \>= $(2) \) )
 endef
 
 # CCACHE
@@ -431,6 +432,7 @@ define pkg_config_find_and_add_enabled
   endif
 
   NETSURF_FEATURE_$(1)_AVAILABLE := $$(shell $$(PKG_CONFIG) --exists $(2) && echo yes)
+  NETSURF_FEATURE_$(1)_CFLAGS ?= -DWITH_$(1)
 
   ifeq ($$(NETSURF_USE_$(1)),YES)
     ifeq ($$(NETSURF_FEATURE_$(1)_AVAILABLE),yes)
@@ -491,6 +493,11 @@ ifeq ($(call cc_ver_ge,4,6),1)
   COMMON_WARNFLAGS += -Wno-unused-but-set-variable
 endif
 
+# Implicit fallthrough warnings suppressed by comment
+ifeq ($(call cc_ver_ge,7,1),1)
+  COMMON_WARNFLAGS += -Wimplicit-fallthrough=3
+endif
+
 # deal with chaging warning flags for different platforms
 ifeq ($(HOST),OpenBSD)
   # OpenBSD headers are not compatible with redundant declaration warning
@@ -529,15 +536,10 @@ LDFLAGS += -lz
 # Optional libraries with pkgconfig
 
 # define additional CFLAGS and LDFLAGS requirements for pkg-configed libs
-NETSURF_FEATURE_PNG_CFLAGS := -DWITH_PNG
-NETSURF_FEATURE_BMP_CFLAGS := -DWITH_BMP
-NETSURF_FEATURE_GIF_CFLAGS := -DWITH_GIF
-NETSURF_FEATURE_CURL_CFLAGS := -DWITH_CURL
+# We only need to define the ones where the feature name doesn't exactly
+# match the WITH_FEATURE flag
 NETSURF_FEATURE_NSSVG_CFLAGS := -DWITH_NS_SVG
-NETSURF_FEATURE_OPENSSL_CFLAGS := -DWITH_OPENSSL
 NETSURF_FEATURE_ROSPRITE_CFLAGS := -DWITH_NSSPRITE
-NETSURF_FEATURE_NSPSL_CFLAGS := -DWITH_NSPSL
-NETSURF_FEATURE_NSLOG_CFLAGS := -DWITH_NSLOG
 
 # libcurl and openssl ordering matters as if libcurl requires ssl it
 #  needs to come first in link order to ensure its symbols can be
@@ -552,6 +554,7 @@ else
 endif
 $(eval $(call pkg_config_find_and_add_enabled,OPENSSL,openssl,OpenSSL))
 
+$(eval $(call pkg_config_find_and_add_enabled,WEBP,libwebp,WEBP))
 $(eval $(call pkg_config_find_and_add_enabled,PNG,libpng,PNG))
 $(eval $(call pkg_config_find_and_add_enabled,BMP,libnsbmp,BMP))
 $(eval $(call pkg_config_find_and_add_enabled,GIF,libnsgif,GIF))

@@ -89,7 +89,9 @@ struct gui_download_window {
 	GError *error;
 };
 
-typedef	void (*nsgtk_download_selection_action)(struct gui_download_window *dl);
+typedef	void (*nsgtk_download_selection_action)(
+		struct gui_download_window *dl,
+		void *user_data);
 
 static GtkWindow *nsgtk_download_window, *nsgtk_download_parent;
 static GtkProgressBar *nsgtk_download_progress_bar;
@@ -212,6 +214,26 @@ static void nsgtk_download_sensitivity_evaluate(GtkTreeSelection *selection)
 	nsgtk_download_sensitivity_update_buttons(sensitivity);
 }
 
+/**
+ * Wrapper to GFunc-ify gtk_tree_path_free for g_list_foreach.
+ */
+static void nsgtk_download_gfunc__gtk_tree_path_free(
+		gpointer data,
+		gpointer user_data)
+{
+	gtk_tree_path_free(data);
+}
+
+/**
+ * Wrapper to GFunc-ify g_free for g_list_foreach.
+ */
+static void nsgtk_download_gfunc__g_free(
+		gpointer data,
+		gpointer user_data)
+{
+	g_free(data);
+}
+
 static void nsgtk_download_do(nsgtk_download_selection_action action)
 {
 	GList *rows, *dls = NULL;
@@ -235,8 +257,8 @@ static void nsgtk_download_do(nsgtk_download_selection_action action)
 
 			rows = rows->next;
 		}
-		g_list_foreach(rows, (GFunc)gtk_tree_path_free, NULL);
-		g_list_foreach(rows, (GFunc)g_free, NULL);
+		g_list_foreach(rows, nsgtk_download_gfunc__gtk_tree_path_free, NULL);
+		g_list_foreach(rows, nsgtk_download_gfunc__g_free, NULL);
 		g_list_free(rows);
 	} else
 		dls = g_list_copy(nsgtk_downloads_list);
@@ -388,7 +410,9 @@ static gboolean nsgtk_download_update(gboolean force_update)
 		return TRUE;
 }
 
-static void nsgtk_download_store_clear_item(struct gui_download_window *dl)
+static void nsgtk_download_store_clear_item(
+		struct gui_download_window *dl,
+		void *user_data)
 {
 	if (dl->sensitivity & NSGTK_DOWNLOAD_CLEAR) {
 		nsgtk_downloads_list = g_list_remove(nsgtk_downloads_list, dl);
@@ -445,7 +469,9 @@ static void nsgtk_download_change_status (
 	}
 }
 
-static void nsgtk_download_store_cancel_item (struct gui_download_window *dl)
+static void nsgtk_download_store_cancel_item (
+		struct gui_download_window *dl,
+		void *user_data)
 {
 	if (dl->sensitivity & NSGTK_DOWNLOAD_CANCEL) {
 		dl->speed = 0;
@@ -719,6 +745,16 @@ static void nsgtk_download_store_create_item (struct gui_download_window *dl)
 			   NSGTK_DOWNLOAD, dl, -1);
 }
 
+/**
+ * Wrapper to GSourceFunc-ify nsgtk_download_update.
+ */
+static gboolean nsgtk_download_gsourcefunc__nsgtk_download_update(
+		gpointer user_data)
+{
+	bool *force_update = user_data;
+	return nsgtk_download_update(*force_update);
+}
+
 static struct gui_download_window *
 gui_download_window_create(download_context *ctx, struct gui_window *gui)
 {
@@ -799,8 +835,10 @@ gui_download_window_create(download_context *ctx, struct gui_window *gui)
 		nsgtk_download_change_status(download, NSGTK_DOWNLOAD_WORKING);
 
 	if (nsgtk_downloads_num_active == 0) {
-		g_timeout_add(UPDATE_RATE,
-			      (GSourceFunc) nsgtk_download_update, FALSE);
+		g_timeout_add(
+			UPDATE_RATE,
+			nsgtk_download_gsourcefunc__nsgtk_download_update,
+			FALSE);
 	}
 
 	nsgtk_downloads_list = g_list_prepend(nsgtk_downloads_list, download);
@@ -851,7 +889,7 @@ static void gui_download_window_done(struct gui_download_window *dw)
 	nsgtk_download_change_status(dw, NSGTK_DOWNLOAD_COMPLETE);
 
 	if (nsoption_bool(downloads_clear))
-		nsgtk_download_store_clear_item(dw);
+		nsgtk_download_store_clear_item(dw, NULL);
 	else
 		nsgtk_download_update(TRUE);
 }

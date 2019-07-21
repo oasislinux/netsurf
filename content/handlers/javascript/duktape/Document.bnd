@@ -35,7 +35,7 @@ method Document::write()
 	}
 	duk_concat(ctx, duk_get_top(ctx));
 	text = duk_safe_to_lstring(ctx, 0, &text_len);
-	JS_LOG("Writing %*s", (int)text_len, text);
+	NSLOG(netsurf, DEBUG, "Writing %*s", (int)text_len, text);
 
 	err = dom_node_get_user_data(priv->parent.node,
 				     corestring_dom___ns_key_html_content_data,
@@ -70,7 +70,7 @@ method Document::writeln()
 	duk_concat(ctx, duk_get_top(ctx));
 	text = duk_safe_to_lstring(ctx, 0, &text_len);
 
-	JS_LOG("Writeln %*s", (int)text_len, text);
+	NSLOG(netsurf, DEBUG, "Writeln %*s", (int)text_len, text);
 	err = dom_node_get_user_data(priv->parent.node,
 				     corestring_dom___ns_key_html_content_data,
 				     &htmlc);
@@ -143,6 +143,62 @@ method Document::createElement()
 	dukky_push_node(ctx, newnode);
 
 	dom_node_unref(newnode);
+
+	return 1;
+%}
+
+method Document::createElementNS()
+%{
+	dom_node *newnode;
+	dom_exception err;
+	duk_size_t text_len;
+	duk_size_t ns_len;
+	const char *ns = duk_safe_to_lstring(ctx, 0, &ns_len);
+	const char *text = duk_safe_to_lstring(ctx, 0, &text_len);
+	dom_string *text_str;
+	dom_string *ns_str;
+
+	err = dom_string_create((const uint8_t*)ns, ns_len, &ns_str);
+	if (err != DOM_NO_ERR) return 0; /* coerced to undefined */
+
+	err = dom_string_create((const uint8_t*)text, text_len, &text_str);
+	if (err != DOM_NO_ERR) {
+		dom_string_unref(ns_str);
+		return 0; /* coerced to undefined */
+	}
+
+	err = dom_document_create_element_ns(priv->parent.node,
+					     ns_str,
+					     text_str,
+					     &newnode);
+	if (err != DOM_NO_ERR) {
+		dom_string_unref(ns_str);
+		dom_string_unref(text_str);
+		return 0; /* coerced to undefined */
+	}
+
+	dom_string_unref(text_str);
+	dom_string_unref(ns_str);
+
+	dukky_push_node(ctx, newnode);
+
+	dom_node_unref(newnode);
+
+	return 1;
+%}
+
+method Document::createDocumentFragment()
+%{
+	struct dom_document_fragment *frag = NULL;
+	dom_exception err;
+
+	err = dom_document_create_document_fragment(priv->parent.node, &frag);
+
+	if (err != DOM_NO_ERR) return 0; /* coerced to undefined */
+
+	dukky_push_node(ctx, (dom_node *)frag);
+
+	dom_node_unref(frag); /* The pushed node holds the reference now */
 
 	return 1;
 %}
@@ -290,10 +346,18 @@ method Document::getElementsByTagName()
 
 	if (nodes == NULL) return 0; /* coerced to undefined */
 
+	dukky_push_generics(ctx, "makeListProxy");
+
 	duk_push_pointer(ctx, nodes);
 	dukky_create_object(ctx, PROTO_NAME(NODELIST), 1);
 	dom_nodelist_unref(nodes);
-	return 1;
+
+	if (dukky_pcall(ctx, 1, false) != 0) {
+		NSLOG(dukky, DEBUG, "Unable to construct nodelist?");
+		return 0; /* coerced to undefined */
+	}
+
+	return 1; /* The Proxy(NodeList) wrapper */
 %}
 
 getter Document::cookie()
@@ -318,6 +382,23 @@ getter Document::cookie()
 		      priv->parent.node, htmlc);
 	}
 	return 0;
+%}
+
+method Document::createEvent ()
+%{
+	/* Create a new event, mark it untrusted since it's new from JS */
+	dom_event *evt = NULL;
+	dom_exception exc;
+
+	exc = dom_event_create(&evt);
+	if (exc != DOM_NO_ERR) return 0;
+	exc = dom_event_set_is_trusted(evt, false);
+	if (exc != DOM_NO_ERR) { dom_event_unref(evt); return 0; }
+
+	dukky_push_event(ctx, evt);
+
+	dom_event_unref(evt);
+	return 1;
 %}
 
 getter Document::onabort();

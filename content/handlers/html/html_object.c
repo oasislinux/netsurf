@@ -166,7 +166,7 @@ html_object_callback(hlcache_handle *object,
 					c->base.status == CONTENT_STATUS_DONE)
 				content__reformat(&c->base, false,
 						c->base.available_width,
-						c->base.height);
+						c->base.available_height);
 		}
 		break;
 
@@ -354,6 +354,13 @@ html_object_callback(hlcache_handle *object,
 		*(event->data.jscontext) = NULL;
 		break;
 
+	case CONTENT_MSG_GETDIMS:
+		*(event->data.getdims.viewport_width) =
+				content__get_width(&c->base);
+		*(event->data.getdims.viewport_height) =
+				content__get_height(&c->base);
+		break;
+
 	case CONTENT_MSG_SCROLL:
 		if (box->scroll_x != NULL)
 			scrollbar_set(box->scroll_x, event->data.scroll.x0,
@@ -459,7 +466,7 @@ html_object_callback(hlcache_handle *object,
 	     event->type == CONTENT_MSG_ERRORCODE)) {
 		/* all objects have arrived */
 		content__reformat(&c->base, false, c->base.available_width,
-				c->base.height);
+				c->base.available_height);
 		content_set_done(&c->base);
 	} else if (nsoption_bool(incremental_reflow) &&
 		   event->type == CONTENT_MSG_DONE &&
@@ -484,7 +491,7 @@ html_object_callback(hlcache_handle *object,
 			content__reformat(&c->base,
 					  false,
 					  c->base.available_width,
-					  c->base.height);
+					  c->base.available_height);
 		}
 	}
 

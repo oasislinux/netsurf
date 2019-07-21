@@ -554,8 +554,8 @@ static nserror textplain_clone(const struct content *old, struct content **newc)
 	const textplain_content *old_text = (textplain_content *) old;
 	textplain_content *text;
 	nserror error;
-	const char *data;
-	unsigned long size;
+	const uint8_t *data;
+	size_t size;
 
 	text = calloc(1, sizeof(textplain_content));
 	if (text == NULL)
@@ -576,7 +576,9 @@ static nserror textplain_clone(const struct content *old, struct content **newc)
 
 	data = content__get_source_data(&text->base, &size);
 	if (size > 0) {
-		if (textplain_process_data(&text->base, data, size) == false) {
+		if (textplain_process_data(&text->base,
+					   (const char *)data,
+					   size) == false) {
 			content_destroy(&text->base);
 			return NSERROR_NOMEM;
 		}
@@ -1202,7 +1204,7 @@ textplain_redraw(struct content *c,
 /**
  * Handle a window containing a CONTENT_TEXTPLAIN being opened.
  */
-static void
+static nserror
 textplain_open(struct content *c,
 	       struct browser_window *bw,
 	       struct content *page,
@@ -1214,13 +1216,15 @@ textplain_open(struct content *c,
 
 	/* text selection */
 	selection_init(&text->sel, NULL, NULL);
+
+	return NSERROR_OK;
 }
 
 
 /**
  * Handle a window containing a CONTENT_TEXTPLAIN being closed.
  */
-static void textplain_close(struct content *c)
+static nserror textplain_close(struct content *c)
 {
 	textplain_content *text = (textplain_content *) c;
 
@@ -1229,6 +1233,8 @@ static void textplain_close(struct content *c)
 	}
 
 	text->bw = NULL;
+
+	return NSERROR_OK;
 }
 
 

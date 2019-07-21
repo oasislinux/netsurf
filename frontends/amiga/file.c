@@ -84,9 +84,9 @@ void ami_file_open(struct gui_window_2 *gwin)
 
 	if(AslRequestTags(filereq,
 			ASLFR_TitleText, messages_get("NetSurf"),
-			ASLFR_Window, gwin->win,
+			ASLFR_Window, ami_gui2_get_window(gwin),
 			ASLFR_SleepWindow, TRUE,
-			ASLFR_Screen, scrn,
+			ASLFR_Screen, ami_gui_get_screen(),
 			ASLFR_DoSaveMode, FALSE,
 			ASLFR_RejectIcons, TRUE,
 			ASLFR_FilterFunc, &aslhookfunc,
@@ -100,7 +100,7 @@ void ami_file_open(struct gui_window_2 *gwin)
 			if (netsurf_path_to_nsurl(temp, &url) != NSERROR_OK) {
 				amiga_warn_user("NoMemory", 0);
 			} else {
-				browser_window_navigate(gwin->gw->bw,
+				browser_window_navigate(ami_gui2_get_browser_window(gwin),
 					url,
 					NULL,
 					BW_NAVIGATE_HISTORY,
@@ -146,8 +146,9 @@ void ami_file_save(int type, char *fname, struct Window *win,
 		struct browser_window *bw)
 {
 	BPTR lock, fh;
-	const char *source_data;
-	ULONG source_size;
+	const uint8_t *source_data;
+	char *selection;
+	size_t source_size;
 	struct bitmap *bm;
 
 	ami_update_pointer(win, GUI_POINTER_WAIT);
@@ -155,7 +156,8 @@ void ami_file_save(int type, char *fname, struct Window *win,
 	if(ami_download_check_overwrite(fname, win, 0)) {
 		switch(type) {
 			case AMINS_SAVE_SOURCE:
-				if((source_data = content_get_source_data(object, &source_size))) {
+				source_data = content_get_source_data(object, &source_size);
+				if(source_data) {
 					BPTR fh;
 					if((fh = FOpen(fname, MODE_NEWFILE,0))) {
 						FWrite(fh, source_data, 1, source_size);
@@ -197,12 +199,17 @@ void ami_file_save(int type, char *fname, struct Window *win,
 			break;
 
 			case AMINS_SAVE_SELECTION:
-				if((source_data = browser_window_get_selection(bw))) {
-					if((fh = FOpen(fname, MODE_NEWFILE,0))) {
-						FWrite(fh, source_data, 1, strlen(source_data));
+				selection = browser_window_get_selection(bw);
+				if(selection) {
+					fh = FOpen(fname, MODE_NEWFILE,0);
+					if (fh) {
+						FWrite(fh,
+						       selection,
+						       1,
+						       strlen(selection));
 						FClose(fh);
 					}
-					free((void *)source_data);
+					free(selection);
 				}
 			break;
 		}
@@ -250,17 +257,18 @@ void ami_file_save_req(int type, struct gui_window_2 *gwin,
 	}
 
 	if(AslRequestTags(savereq,
-			ASLFR_Window, gwin->win,
+			ASLFR_Window, ami_gui2_get_window(gwin),
 			ASLFR_SleepWindow, TRUE,
 			ASLFR_TitleText, messages_get("NetSurf"),
-			ASLFR_Screen, scrn,
+			ASLFR_Screen, ami_gui_get_screen(),
 			ASLFR_InitialFile, fname_with_ext ? fname_with_ext : "",
 			TAG_DONE))
 	{
 		strlcpy(fname, savereq->fr_Drawer, 1024);
 		AddPart(fname, savereq->fr_File, 1024);
 
-		ami_file_save(type, fname, gwin->win, object, gwin->gw->favicon, gwin->gw->bw);
+		ami_file_save(type, fname, ami_gui2_get_window(gwin), object,
+			ami_gui_get_favicon(ami_gui2_get_gui_window(gwin)), ami_gui2_get_browser_window(gwin));
 	}
 
 	if(fname) free(fname);

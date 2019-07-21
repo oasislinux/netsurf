@@ -82,7 +82,7 @@ case ${TARGET} in
 
 	esac
 
-	PKG_SRC=netsurf_x86-3.8-1-x86_gcc2
+	PKG_SRC=netsurf_x86-3.9-1-x86_gcc2
 	PKG_SFX=.hpkg
 	;;
 
@@ -442,27 +442,42 @@ if [ ! -f "${PKG_SRC}${PKG_SFX}" ]; then
     exit 1
 fi
 
+# create package checksum files
+
+# find md5sum binary
+MD5SUM=md5sum;
+command -v ${MD5SUM} >/dev/null 2>&1 || MD5SUM=md5
+command -v ${MD5SUM} >/dev/null 2>&1 || MD5SUM=echo
+
+# find sha256 binary name
+SHAR256SUM=sha256sum
+command -v ${SHAR256SUM} >/dev/null 2>&1 || SHAR256SUM=sha256
+command -v ${SHAR256SUM} >/dev/null 2>&1 || SHAR256SUM=echo
+
+${MD5SUM} "${PKG_SRC}${PKG_SFX}" > ${PKG_SRC}.md5
+${SHAR256SUM} "${PKG_SRC}${PKG_SFX}" > ${PKG_SRC}.sha256
+
 
 ############ Package artifact deployment ################
 
 #destination for package artifacts
 DESTDIR=/srv/ci.netsurf-browser.org/html/builds/${TARGET}/
 
-NEW_ARTIFACT_TARGET="NetSurf-${IDENTIFIER}${PKG_SFX}"
+NEW_ARTIFACT_TARGET="NetSurf-${IDENTIFIER}"
+OLD_ARTIFACT_TARGETS=""
 
-# copy the file into the output - always use scp as it works local or remote
-scp "${PKG_SRC}${PKG_SFX}" netsurf@ci.netsurf-browser.org:${DESTDIR}/${NEW_ARTIFACT_TARGET}
+for SUFFIX in "${PKG_SFX}" .md5 .sha256;do
+    # copy the file to the output - always use scp as it works local or remote
+    scp "${PKG_SRC}${SUFFIX}" netsurf@ci.netsurf-browser.org:${DESTDIR}/${NEW_ARTIFACT_TARGET}${SUFFIX}
 
-# remove the local package file artifact
-rm -f "${PKG_SRC}${PKG_SFX}"
+    # remove the local file artifact
+    rm -f "${PKG_SRC}${SUFFIX}"
 
-# setup latest link
-ssh netsurf@ci.netsurf-browser.org "rm -f ${DESTDIR}/LATEST && echo "${NEW_ARTIFACT_TARGET}" > ${DESTDIR}/LATEST"
+    OLD_ARTIFACT_TARGETS="${OLD_ARTIFACT_TARGETS} ${DESTDIR}/NetSurf-${OLD_IDENTIFIER}${SUFFIX}"
+done
 
 
+############ Expired package artifact removal and latest linking ##############
 
-############ Package artifact cleanup ################
 
-OLD_ARTIFACT_TARGET="NetSurf-${OLD_IDENTIFIER}${PKG_SFX}"
-
-ssh netsurf@ci.netsurf-browser.org "rm -f ${DESTDIR}/${OLD_ARTIFACT_TARGET}"
+ssh netsurf@ci.netsurf-browser.org "rm -f ${OLD_ARTIFACT_TARGETS} ${DESTDIR}/LATEST && echo "${NEW_ARTIFACT_TARGET}${PKG_SFX}" > ${DESTDIR}/LATEST"

@@ -1,5 +1,5 @@
 /*
- * Copyright 2008-2016 Chris Young <chris@unsatisfactorysoftware.co.uk>
+ * Copyright 2008-2019 Chris Young <chris@unsatisfactorysoftware.co.uk>
  *
  * This file is part of NetSurf, http://www.netsurf-browser.org/
  *
@@ -36,9 +36,16 @@
 #include <proto/icon.h>
 #include <proto/intuition.h>
 #include <proto/keymap.h>
+#include <proto/layers.h>
 #include <proto/locale.h>
 #include <proto/utility.h>
 #include <proto/wb.h>
+
+#ifdef WITH_AMISSL
+/* AmiSSL needs everything to use bsdsocket.library directly to avoid problems */
+#include <proto/bsdsocket.h>
+#define waitselect WaitSelect
+#endif
 
 /* Other OS includes */
 #include <datatypes/textclass.h>
@@ -187,16 +194,128 @@
 
 extern struct gui_utf8_table *amiga_utf8_table;
 
+enum
+{
+    OID_MAIN = 0,
+	OID_VSCROLL,
+	OID_HSCROLL,
+	GID_MAIN,
+	GID_TABLAYOUT,
+	GID_BROWSER,
+	GID_STATUS,
+	GID_URL,
+	GID_ICON,
+	GID_STOP,
+	GID_RELOAD,
+	GID_HOME,
+	GID_BACK,
+	GID_FORWARD,
+	GID_THROBBER,
+	GID_SEARCH_ICON,
+	GID_FAVE,
+	GID_FAVE_ADD,
+	GID_FAVE_RMV,
+	GID_CLOSETAB,
+	GID_CLOSETAB_BM,
+	GID_ADDTAB,
+	GID_ADDTAB_BM,
+	GID_TABS,
+	GID_TABS_FLAG,
+	GID_SEARCHSTRING,
+	GID_TOOLBARLAYOUT,
+	GID_HOTLIST,
+	GID_HOTLISTLAYOUT,
+	GID_HOTLISTSEPBAR,
+	GID_HSCROLL,
+	GID_HSCROLLLAYOUT,
+	GID_VSCROLL,
+	GID_VSCROLLLAYOUT,
+	GID_LAST
+};
+
+struct gui_window_2 {
+	struct ami_generic_window w;
+	struct Window *win;
+	Object *restrict objects[GID_LAST];
+	struct gui_window *gw; /* currently-displayed gui_window */
+	bool redraw_required;
+	int throbber_frame;
+	struct List tab_list;
+	ULONG tabs;
+	ULONG next_tab;
+	struct Node *last_new_tab;
+	struct Hook scrollerhook;
+	browser_mouse_state mouse_state;
+	browser_mouse_state key_state;
+	ULONG throbber_update_count;
+	struct find_window *searchwin;
+	ULONG oldh;
+	ULONG oldv;
+	int temp;
+	bool redraw_scroll;
+	bool new_content;
+	struct ami_menu_data *menu_data[AMI_MENU_AREXX_MAX + 1]; /* only for GadTools menus */
+	ULONG hotlist_items;
+	Object *restrict hotlist_toolbar_lab[AMI_GUI_TOOLBAR_MAX];
+	struct List hotlist_toolbar_list;
+	struct List *web_search_list;
+	Object *search_bm;
+	char *restrict svbuffer;
+	char *restrict status;
+	char *restrict wintitle;
+	char *restrict helphints[GID_LAST];
+	browser_mouse_state prev_mouse_state;
+	struct timeval lastclick;
+	struct AppIcon *appicon; /* iconify appicon */
+	struct DiskObject *dobj; /* iconify appicon */
+	struct Hook favicon_hook;
+	struct Hook throbber_hook;
+	struct Hook browser_hook;
+	struct Hook *ctxmenu_hook;
+	Object *restrict history_ctxmenu[2];
+	Object *clicktab_ctxmenu;
+	gui_drag_type drag_op;
+	struct IBox *ptr_lock;
+	struct AppWindow *appwin;
+	struct MinList *shared_pens;
+	gui_pointer_shape mouse_pointer;
+	struct Menu *imenu; /* Intuition menu */
+	bool closed; /* Window has been closed (via menu) */
+};
+
+struct gui_window
+{
+	struct gui_window_2 *shared;
+	int tab;
+	struct Node *tab_node;
+	int c_x; /* Caret X posn */
+	int c_y; /* Caret Y posn */
+	int c_w; /* Caret width */
+	int c_h; /* Caret height */
+	int c_h_temp;
+	int scrollx;
+	int scrolly;
+	struct ami_history_local_window *hw;
+	struct List dllist;
+	struct hlcache_handle *favicon;
+	bool throbbing;
+	char *tabtitle;
+	APTR deferred_rects_pool;
+	struct MinList *deferred_rects;
+	struct browser_window *bw;
+	float scale;
+};
+
 struct ami_gui_tb_userdata {
 	struct List *sblist;
 	struct gui_window_2 *gw;
 	int items;
 };
 
-struct MinList *window_list = NULL;
-struct Screen *scrn = NULL;
-struct MsgPort *sport = NULL;
-struct gui_window *cur_gw = NULL;
+static struct MinList *window_list = NULL;
+static struct Screen *scrn = NULL;
+static struct MsgPort *sport = NULL;
+static struct gui_window *cur_gw = NULL;
 
 static bool ami_quit = false;
 
@@ -231,17 +350,15 @@ static const __attribute__((used)) char *stack_cookie = "\0$STACK:196608\0";
 const char * const versvn;
 const char * const verdate;
 
-void ami_switch_tab(struct gui_window_2 *gwin, bool redraw);
-void ami_change_tab(struct gui_window_2 *gwin, int direction);
-void ami_get_hscroll_pos(struct gui_window_2 *gwin, ULONG *xs);
-void ami_get_vscroll_pos(struct gui_window_2 *gwin, ULONG *ys);
-void ami_quit_netsurf_delayed(void);
-Object *ami_gui_splash_open(void);
-void ami_gui_splash_close(Object *win_obj);
-HOOKF(uint32, ami_set_favicon_render_hook, APTR, space, struct gpRender *);
-HOOKF(uint32, ami_set_throbber_render_hook, APTR, space, struct gpRender *);
-bool ami_gui_map_filename(char **remapped, const char *restrict path, const char *restrict file,
-	const char *restrict map);
+static void ami_switch_tab(struct gui_window_2 *gwin, bool redraw);
+static void ami_change_tab(struct gui_window_2 *gwin, int direction);
+static void ami_get_hscroll_pos(struct gui_window_2 *gwin, ULONG *xs);
+static void ami_get_vscroll_pos(struct gui_window_2 *gwin, ULONG *ys);
+static void ami_quit_netsurf_delayed(void);
+static Object *ami_gui_splash_open(void);
+static void ami_gui_splash_close(Object *win_obj);
+static bool ami_gui_map_filename(char **remapped, const char *restrict path,
+	const char *restrict file, const char *restrict map);
 static void ami_gui_window_update_box_deferred(struct gui_window *g, bool draw);
 static void ami_do_redraw(struct gui_window_2 *g);
 static void ami_schedule_redraw_remove(struct gui_window_2 *gwin);
@@ -250,8 +367,10 @@ static bool gui_window_get_scroll(struct gui_window *g, int *restrict sx, int *r
 static nserror gui_window_set_scroll(struct gui_window *g, const struct rect *rect);
 static void gui_window_remove_caret(struct gui_window *g);
 static void gui_window_place_caret(struct gui_window *g, int x, int y, int height, const struct rect *clip);
-//static void amiga_window_invalidate_area(struct gui_window *g, const struct rect *restrict rect);
 
+HOOKF(uint32, ami_set_favicon_render_hook, APTR, space, struct gpRender *);
+HOOKF(uint32, ami_set_throbber_render_hook, APTR, space, struct gpRender *);
+HOOKF(uint32, ami_gui_browser_render_hook, APTR, space, struct gpRender *);
 
 /* accessors for default options - user option is updated if it is set as per default */
 #define nsoption_default_set_int(OPTION, VALUE)				\
@@ -259,6 +378,315 @@ static void gui_window_place_caret(struct gui_window *g, int x, int y, int heigh
 		nsoptions[NSOPTION_##OPTION].value.i = VALUE;	\
 	nsoptions_default[NSOPTION_##OPTION].value.i = VALUE
 
+/* Functions documented in gui.h */
+struct MsgPort *ami_gui_get_shared_msgport(void)
+{
+	assert(sport != NULL);
+	return sport;
+}
+
+struct gui_window *ami_gui_get_active_gw(void)
+{
+	return cur_gw;
+}
+
+struct Screen *ami_gui_get_screen(void)
+{
+	return scrn;
+}
+
+struct MinList *ami_gui_get_window_list(void)
+{
+	assert(window_list != NULL);
+	return window_list;
+}
+
+void ami_gui_beep(void)
+{
+	DisplayBeep(scrn);
+}
+
+struct browser_window *ami_gui_get_browser_window(struct gui_window *gw)
+{
+	assert(gw != NULL);
+	return gw->bw;
+}
+
+struct browser_window *ami_gui2_get_browser_window(struct gui_window_2 *gwin)
+{
+	assert(gwin != NULL);
+	return ami_gui_get_browser_window(gwin->gw);
+}
+
+struct List *ami_gui_get_download_list(struct gui_window *gw)
+{
+	assert(gw != NULL);
+	return &gw->dllist;
+}
+
+struct gui_window_2 *ami_gui_get_gui_window_2(struct gui_window *gw)
+{
+	assert(gw != NULL);
+	return gw->shared;
+}
+
+struct gui_window *ami_gui2_get_gui_window(struct gui_window_2 *gwin)
+{
+	assert(gwin != NULL);
+	return gwin->gw;
+}
+
+const char *ami_gui_get_win_title(struct gui_window *gw)
+{
+	assert(gw != NULL);
+	assert(gw->shared != NULL);
+	return (const char *)gw->shared->wintitle;
+}
+
+const char *ami_gui_get_tab_title(struct gui_window *gw)
+{
+	assert(gw != NULL);
+	return (const char *)gw->tabtitle;
+}
+
+struct Node *ami_gui_get_tab_node(struct gui_window *gw)
+{
+	assert(gw != NULL);
+	return gw->tab_node;
+}
+
+ULONG ami_gui2_get_tabs(struct gui_window_2 *gwin)
+{
+	assert(gwin != NULL);
+	return gwin->tabs;
+}
+
+struct List *ami_gui2_get_tab_list(struct gui_window_2 *gwin)
+{
+	assert(gwin != NULL);
+	return &gwin->tab_list;
+}
+
+struct hlcache_handle *ami_gui_get_favicon(struct gui_window *gw)
+{
+	assert(gw != NULL);
+	return gw->favicon;
+}
+
+struct ami_history_local_window *ami_gui_get_history_window(struct gui_window *gw)
+{
+	assert(gw != NULL);
+	return gw->hw;
+}
+
+void ami_gui_set_history_window(struct gui_window *gw, struct ami_history_local_window *hw)
+{
+	assert(gw != NULL);
+	gw->hw = hw;
+}
+
+void ami_gui_set_find_window(struct gui_window *gw, struct find_window *fw)
+{
+	/* This needs to be in gui_window_2 as it is shared amongst tabs (I think),
+	 * it just happens that the find code only knows of the gui_window
+	 */
+	assert(gw != NULL);
+	assert(gw->shared != NULL);
+	gw->shared->searchwin = fw;
+}
+
+bool ami_gui_get_throbbing(struct gui_window *gw)
+{
+	assert(gw != NULL);
+	return gw->throbbing;
+}
+
+void ami_gui_set_throbbing(struct gui_window *gw, bool throbbing)
+{
+	assert(gw != NULL);
+	gw->throbbing = throbbing;
+}
+
+int ami_gui_get_throbber_frame(struct gui_window *gw)
+{
+	assert(gw != NULL);
+	assert(gw->shared != NULL);
+	return gw->shared->throbber_frame;
+}
+
+void ami_gui_set_throbber_frame(struct gui_window *gw, int frame)
+{
+	assert(gw != NULL);
+	assert(gw->shared != NULL);
+	gw->shared->throbber_frame = frame;
+}
+
+Object *ami_gui2_get_object(struct gui_window_2 *gwin, int object_type)
+{
+	ULONG obj = 0;
+
+	assert(gwin != NULL);
+
+	switch(object_type) {
+		case AMI_WIN_MAIN:
+			obj = OID_MAIN;
+		break;
+
+		case AMI_GAD_THROBBER:
+			obj = GID_THROBBER;
+		break;
+
+		case AMI_GAD_TABS:
+			obj = GID_TABS;
+		break;
+
+		case AMI_GAD_URL:
+			obj = GID_URL;
+		break;
+
+		case AMI_GAD_SEARCH:
+			obj = GID_SEARCHSTRING;
+		break;
+
+		default:
+			return NULL;
+		break;
+	}
+
+	return gwin->objects[obj];
+}
+
+
+struct Window *ami_gui2_get_window(struct gui_window_2 *gwin)
+{
+	assert(gwin != NULL);
+	return gwin->win;
+}
+
+struct Window *ami_gui_get_window(struct gui_window *gw)
+{
+	assert(gw != NULL);
+	return ami_gui2_get_window(gw->shared);
+}
+
+struct Menu *ami_gui_get_menu(struct gui_window *gw)
+{
+	assert(gw != NULL);
+	assert(gw->shared != NULL);
+	return gw->shared->imenu;
+}
+
+void ami_gui2_set_menu(struct gui_window_2 *gwin, struct Menu *menu)
+{
+	if(menu != NULL) {
+		gwin->imenu = menu;
+	} else {
+		ami_gui_menu_freemenus(gwin->imenu, gwin->menu_data);
+	}
+}
+
+struct ami_menu_data **ami_gui2_get_menu_data(struct gui_window_2 *gwin)
+{
+	assert(gwin != NULL);
+	return gwin->menu_data;
+}
+
+void ami_gui2_set_ctxmenu_history_tmp(struct gui_window_2 *gwin, int temp)
+{
+	assert(gwin != NULL);
+	gwin->temp = temp;
+}
+
+int ami_gui2_get_ctxmenu_history_tmp(struct gui_window_2 *gwin)
+{
+	assert(gwin != NULL);
+	return gwin->temp;
+}
+
+Object *ami_gui2_get_ctxmenu_history(struct gui_window_2 *gwin, ULONG direction)
+{
+	assert(gwin != NULL);
+	return gwin->history_ctxmenu[direction];
+}
+
+void ami_gui2_set_ctxmenu_history(struct gui_window_2 *gwin, ULONG direction, Object *ctx_hist)
+{
+	assert(gwin != NULL);
+	gwin->history_ctxmenu[direction] = ctx_hist;
+}
+
+void ami_gui2_set_closed(struct gui_window_2 *gwin, bool closed)
+{
+	assert(gwin != NULL);
+	gwin->closed = closed;
+}
+
+void ami_gui2_set_new_content(struct gui_window_2 *gwin, bool new_content)
+{
+	assert(gwin != NULL);
+	gwin->new_content = new_content;
+}
+
+/** undocumented, or internal, or documented elsewhere **/
+
+#ifdef __amigaos4__
+static void *ami_find_gwin_by_id(struct Window *win, uint32 type)
+{
+	struct nsObject *node, *nnode;
+	struct gui_window_2 *gwin;
+
+	if(!IsMinListEmpty(window_list))
+	{
+		node = (struct nsObject *)GetHead((struct List *)window_list);
+
+		do
+		{
+			nnode=(struct nsObject *)GetSucc((struct Node *)node);
+
+			if(node->Type == type)
+			{
+				gwin = node->objstruct;
+				if(win == ami_gui2_get_window(gwin)) return gwin;
+			}
+		} while((node = nnode));
+	}
+	return NULL;
+}
+
+void *ami_window_at_pointer(int type)
+{
+	struct Layer *layer;
+	struct Screen *scrn = ami_gui_get_screen();
+
+	LockLayerInfo(&scrn->LayerInfo);
+
+	layer = WhichLayer(&scrn->LayerInfo, scrn->MouseX, scrn->MouseY);
+
+	UnlockLayerInfo(&scrn->LayerInfo);
+
+	if(layer) return ami_find_gwin_by_id(layer->Window, type);
+		else return NULL;
+}
+#else
+/**\todo check if OS4 version of this function will build on OS3, even if it isn't called */
+void *ami_window_at_pointer(int type)
+{
+	return NULL;
+}
+#endif
+
+void ami_set_pointer(struct gui_window_2 *gwin, gui_pointer_shape shape, bool update)
+{
+	if(gwin->mouse_pointer == shape) return;
+	ami_update_pointer(ami_gui2_get_window(gwin), shape);
+	if(update == true) gwin->mouse_pointer = shape;
+}
+
+/* reset the mouse pointer back to what NetSurf last set it as */
+void ami_reset_pointer(struct gui_window_2 *gwin)
+{
+	ami_update_pointer(ami_gui2_get_window(gwin), gwin->mouse_pointer);
+}
 
 
 STRPTR ami_locale_langs(int *codeset)
@@ -302,7 +730,7 @@ STRPTR ami_locale_langs(int *codeset)
 	return acceptlangs;
 }
 
-bool ami_gui_map_filename(char **remapped, const char *restrict path,
+static bool ami_gui_map_filename(char **remapped, const char *restrict path,
 		const char *restrict file, const char *restrict map)
 {
 	BPTR fh = 0;
@@ -777,25 +1205,10 @@ static void ami_amiupdate(void)
 static nsurl *gui_get_resource_url(const char *path)
 {
 	char buf[1024];
-	char path2[1024];
 	nsurl *url = NULL;
 
 	if(ami_locate_resource(buf, path) == false)
-	{
-		if((strncmp(path + strlen(path) - SLEN(".htm"), ".htm", SLEN(".htm")) == 0) ||
-			(strncmp(path + strlen(path) - SLEN(".html"), ".html", SLEN(".html")) == 0))
-		{
-			/* Try with RISC OS HTML filetype, might work */
-			strcpy(path2, path);
-			strcat(path2, ",faf");
-
-			if(ami_locate_resource(buf, path2) == false)
-			{
-				return NULL;
-			}
-		}
-		else return NULL;
-	}
+		return NULL;
 
 	netsurf_path_to_nsurl(buf, &url);
 
@@ -1037,6 +1450,10 @@ static void gui_init2(int argc, char** argv)
 	    (nsoption_bool(startup_no_window) == false))
 		ami_openscreenfirst();
 
+	if(cli_force == true) {
+		notalreadyrunning = TRUE;
+	}
+
 	if(temp_homepage_url && notalreadyrunning) {
 		error = nsurl_create(temp_homepage_url, &url);
 		if (error == NSERROR_OK) {
@@ -1052,10 +1469,6 @@ static void gui_init2(int argc, char** argv)
 		}
 		free(temp_homepage_url);
 		temp_homepage_url = NULL;
-	}
-
-	if(cli_force == true) {
-		notalreadyrunning = TRUE;
 	}
 
 	if(argc == 0) { // WB
@@ -2493,11 +2906,11 @@ static BOOL ami_gui_event(void *w)
 							break;
 
 							case RAWKEY_F9: // decrease scale
-								ami_gui_set_scale(gwin->gw, gwin->gw->scale - 0.1);
+								ami_gui_adjust_scale(gwin->gw, -0.1);
 							break;
 
 							case RAWKEY_F10: // increase scale
-								ami_gui_set_scale(gwin->gw, gwin->gw->scale + 0.1);
+								ami_gui_adjust_scale(gwin->gw, +0.1);
 							break;
 							
 							case RAWKEY_HELP: // help
@@ -2873,7 +3286,7 @@ void ami_get_msg(void)
 		ami_quit_netsurf_delayed();
 }
 
-void ami_change_tab(struct gui_window_2 *gwin, int direction)
+static void ami_change_tab(struct gui_window_2 *gwin, int direction)
 {
 	struct Node *tab_node = gwin->gw->tab_node;
 	struct Node *ptab = NULL;
@@ -2895,7 +3308,7 @@ void ami_change_tab(struct gui_window_2 *gwin, int direction)
 	ami_switch_tab(gwin, true);
 }
 
-void ami_switch_tab(struct gui_window_2 *gwin, bool redraw)
+static void ami_switch_tab(struct gui_window_2 *gwin, bool redraw)
 {
 	struct Node *tabnode;
 	struct IBox *bbox;
@@ -2991,7 +3404,7 @@ void ami_quit_netsurf(void)
 	}
 }
 
-void ami_quit_netsurf_delayed(void)
+static void ami_quit_netsurf_delayed(void)
 {
 	int res = -1;
 #ifdef __amigaos4__
@@ -3395,7 +3808,7 @@ static void ami_toggletabbar(struct gui_window_2 *gwin, bool show)
 					GA_ID, GID_TABS,
 					GA_RelVerify, TRUE,
 					GA_Underscore, 13, // disable kb shortcuts
-					GA_ContextMenu, ami_ctxmenu_clicktab_create(gwin),
+					GA_ContextMenu, ami_ctxmenu_clicktab_create(gwin, &gwin->clicktab_ctxmenu),
 					CLICKTAB_Labels, &gwin->tab_list,
 					CLICKTAB_LabelTruncate, TRUE,
 					CLICKTAB_CloseImage, gwin->objects[GID_CLOSETAB_BM],
@@ -3520,6 +3933,11 @@ void ami_gui_set_scale(struct gui_window *gw, float scale)
 	if(scale <= 0.0) return;
 	gw->scale = scale;
 	browser_window_set_scale(gw->bw, scale, true);
+}
+
+void ami_gui_adjust_scale(struct gui_window *gw, float adjustment)
+{
+	ami_gui_set_scale(gw, gw->scale + adjustment);
 }
 
 void ami_gui_switch_to_new_tab(struct gui_window_2 *gwin)
@@ -4037,6 +4455,9 @@ gui_window_create(struct browser_window *bw,
 	g->shared->throbber_hook.h_Entry = (void *)ami_set_throbber_render_hook;
 	g->shared->throbber_hook.h_Data = g->shared;
 
+	g->shared->browser_hook.h_Entry = (void *)ami_gui_browser_render_hook;
+	g->shared->browser_hook.h_Data = g->shared;
+
 	newprefs_hook.h_Entry = (void *)ami_gui_newprefs_hook;
 	newprefs_hook.h_Data = 0;
 	
@@ -4401,6 +4822,7 @@ gui_window_create(struct browser_window *bw,
 								LAYOUT_AddChild, g->shared->objects[GID_BROWSER] = SpaceObj,
 									GA_ID,GID_BROWSER,
 									SPACE_Transparent,TRUE,
+									SPACE_RenderHook, &g->shared->browser_hook,
 								SpaceEnd,
 							EndGroup,
 						EndGroup,
@@ -4688,7 +5110,7 @@ static void gui_window_destroy(struct gui_window *g)
 	free(g->shared->svbuffer);
 
 	for(gid = 0; gid < GID_LAST; gid++)
-		free(g->shared->helphints[gid]);
+		ami_utf8_free(g->shared->helphints[gid]);
 
 	ami_gui_win_list_remove(g->shared);
 	if(g->tab_node) {
@@ -4962,7 +5384,7 @@ static void ami_do_redraw(struct gui_window_2 *gwin)
 }
 
 
-void ami_get_hscroll_pos(struct gui_window_2 *gwin, ULONG *xs)
+static void ami_get_hscroll_pos(struct gui_window_2 *gwin, ULONG *xs)
 {
 	if(gwin->objects[GID_HSCROLL])
 	{
@@ -4973,7 +5395,7 @@ void ami_get_hscroll_pos(struct gui_window_2 *gwin, ULONG *xs)
 	}
 }
 
-void ami_get_vscroll_pos(struct gui_window_2 *gwin, ULONG *ys)
+static void ami_get_vscroll_pos(struct gui_window_2 *gwin, ULONG *ys)
 {
 	if(gwin->objects[GID_VSCROLL]) {
 		GetAttr(SCROLLER_Top, gwin->objects[GID_VSCROLL], ys);
@@ -5248,6 +5670,19 @@ HOOKF(uint32, ami_set_throbber_render_hook, APTR, space, struct gpRender *)
 	return 0;
 }
 
+HOOKF(uint32, ami_gui_browser_render_hook, APTR, space, struct gpRender *)
+{
+	struct gui_window_2 *gwin = hook->h_Data;
+
+	NSLOG(netsurf, DEBUG, "Render hook called with %ld (REDRAW=1)", msg->gpr_Redraw);
+
+	if(msg->gpr_Redraw != GREDRAW_REDRAW) return 0;
+
+	ami_schedule_redraw(gwin, true);
+
+	return 0;
+}
+
 static void gui_window_place_caret(struct gui_window *g, int x, int y, int height,
 		const struct rect *clip)
 {
@@ -5395,7 +5830,7 @@ BOOL ami_gadget_hit(Object *obj, int x, int y)
 	else return FALSE;
 }
 
-Object *ami_gui_splash_open(void)
+static Object *ami_gui_splash_open(void)
 {
 	Object *restrict win_obj, *restrict bm_obj;
 	struct Window *win;
@@ -5494,7 +5929,7 @@ Object *ami_gui_splash_open(void)
 	return win_obj;
 }
 
-void ami_gui_splash_close(Object *win_obj)
+static void ami_gui_splash_close(Object *win_obj)
 {
 	if(win_obj == NULL) return;
 

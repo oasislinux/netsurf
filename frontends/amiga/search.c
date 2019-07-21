@@ -61,6 +61,7 @@
 #include "amiga/search.h"
 #include "amiga/object.h"
 #include "amiga/theme.h"
+#include "amiga/utf8.h"
 
 #ifndef NOF_ELEMENTS
 #define NOF_ELEMENTS(array) (sizeof(array)/sizeof(*(array)))
@@ -68,11 +69,33 @@
 
 static bool search_insert;
 
+enum
+{
+    OID_S_MAIN = 0,
+	GID_S_MAIN,
+	GID_S_NEXT,
+	GID_S_PREV,
+	GID_S_SEARCHSTRING,
+	GID_S_SHOWALL,
+	GID_S_CASE,
+	GID_S_LAST
+};
+
+enum {
+	SSTR_TITLE = 0,
+	SSTR_CASE,
+	SSTR_SHOWALL,
+	SSTR_PREV,
+	SSTR_NEXT,
+	SSTR_LAST
+};
+
 struct find_window {
 	struct ami_generic_window w;
 	struct Window *win;
-	Object *objects[GID_LAST];
+	Object *objects[GID_S_LAST];
 	struct gui_window *gwin;
+	char *message[SSTR_LAST];
 };
 
 static struct find_window *fwin = NULL;
@@ -120,10 +143,10 @@ void ami_search_open(struct gui_window *gwin)
 
 	if(fwin)
 	{
-		browser_window_search_clear(fwin->gwin->bw);
-		fwin->gwin->shared->searchwin = NULL;
+		browser_window_search_clear(ami_gui_get_browser_window(fwin->gwin));
+		ami_gui_set_find_window(fwin->gwin, NULL);
 		fwin->gwin = gwin;
-		gwin->shared->searchwin = fwin;
+		ami_gui_set_find_window(fwin->gwin, fwin);
 		WindowToFront(fwin->win);
 		ActivateWindow(fwin->win);
 		return;
@@ -131,77 +154,89 @@ void ami_search_open(struct gui_window *gwin)
 
 	fwin = calloc(1, sizeof(struct find_window));
 
-	fwin->objects[OID_MAIN] = WindowObj,
+	/* Get local charset messages. If any of these are NULL it doesn't matter */
+	fwin->message[SSTR_TITLE] = ami_utf8_easy(messages_get("FindTextNS"));
+	fwin->message[SSTR_CASE] = ami_utf8_easy(messages_get("CaseSens"));
+	fwin->message[SSTR_SHOWALL] = ami_utf8_easy(messages_get("ShowAll"));
+	fwin->message[SSTR_PREV] = ami_utf8_easy(messages_get("Prev"));
+	fwin->message[SSTR_NEXT] = ami_utf8_easy(messages_get("Next"));
+
+	fwin->objects[OID_S_MAIN] = WindowObj,
       	WA_ScreenTitle, ami_gui_get_screen_title(),
-       	WA_Title,messages_get("FindTextNS"),
+       	WA_Title, fwin->message[SSTR_TITLE],
        	WA_Activate, TRUE,
        	WA_DepthGadget, TRUE,
        	WA_DragBar, TRUE,
        	WA_CloseGadget, TRUE,
        	WA_SizeGadget, TRUE,
-		WA_PubScreen,scrn,
-		WINDOW_SharedPort,sport,
-		WINDOW_UserData,fwin,
+		WA_PubScreen, ami_gui_get_screen(),
+		WINDOW_SharedPort, ami_gui_get_shared_msgport(),
+		WINDOW_UserData, fwin,
 		WINDOW_IconifyGadget, FALSE,
-		WINDOW_LockHeight,TRUE,
+		WINDOW_LockHeight, TRUE,
          	WINDOW_Position, WPOS_CENTERSCREEN,
-           	WINDOW_ParentGroup, fwin->objects[GID_MAIN] = LayoutVObj,
-				LAYOUT_AddChild, fwin->objects[GID_SEARCHSTRING] = StringObj,
-					GA_ID,GID_SEARCHSTRING,
-					GA_TabCycle,TRUE,
-					GA_RelVerify,TRUE,
+           	WINDOW_ParentGroup, fwin->objects[GID_S_MAIN] = LayoutVObj,
+				LAYOUT_AddChild, fwin->objects[GID_S_SEARCHSTRING] = StringObj,
+					GA_ID, GID_S_SEARCHSTRING,
+					GA_TabCycle, TRUE,
+					GA_RelVerify, TRUE,
 				StringEnd,
-				CHILD_WeightedHeight,0,
-				LAYOUT_AddChild, fwin->objects[GID_CASE] = CheckBoxObj,
-					GA_ID,GID_CASE,
-					GA_Text,messages_get("CaseSens"),
-					GA_Selected,FALSE,
-					GA_TabCycle,TRUE,
-					GA_RelVerify,TRUE,
+				CHILD_WeightedHeight, 0,
+				LAYOUT_AddChild, fwin->objects[GID_S_CASE] = CheckBoxObj,
+					GA_ID, GID_S_CASE,
+					GA_Text, fwin->message[SSTR_CASE],
+					GA_Selected, FALSE,
+					GA_TabCycle, TRUE,
+					GA_RelVerify, TRUE,
 				CheckBoxEnd,
-				LAYOUT_AddChild, fwin->objects[GID_SHOWALL] = CheckBoxObj,
-					GA_ID,GID_SHOWALL,
-					GA_Text,messages_get("ShowAll"),
-					GA_Selected,FALSE,
-					GA_TabCycle,TRUE,
-					GA_RelVerify,TRUE,
+				LAYOUT_AddChild, fwin->objects[GID_S_SHOWALL] = CheckBoxObj,
+					GA_ID,GID_S_SHOWALL,
+					GA_Text, fwin->message[SSTR_SHOWALL],
+					GA_Selected, FALSE,
+					GA_TabCycle, TRUE,
+					GA_RelVerify, TRUE,
 				CheckBoxEnd,
-
 				LAYOUT_AddChild, LayoutHObj,
-					LAYOUT_AddChild, fwin->objects[GID_PREV] = ButtonObj,
-						GA_ID,GID_PREV,
-						GA_RelVerify,TRUE,
-						GA_Text,messages_get("Prev"),
-						GA_TabCycle,TRUE,
-						GA_Disabled,TRUE,
+					LAYOUT_AddChild, fwin->objects[GID_S_PREV] = ButtonObj,
+						GA_ID, GID_S_PREV,
+						GA_RelVerify, TRUE,
+						GA_Text, fwin->message[SSTR_PREV],
+						GA_TabCycle, TRUE,
+						GA_Disabled, TRUE,
 					ButtonEnd,
-					CHILD_WeightedHeight,0,
-					LAYOUT_AddChild, fwin->objects[GID_NEXT] = ButtonObj,
-						GA_ID,GID_NEXT,
-						GA_RelVerify,TRUE,
-						GA_Text,messages_get("Next"),
-						GA_TabCycle,TRUE,
-						GA_Disabled,TRUE,
+					CHILD_WeightedHeight, 0,
+					LAYOUT_AddChild, fwin->objects[GID_S_NEXT] = ButtonObj,
+						GA_ID, GID_S_NEXT,
+						GA_RelVerify, TRUE,
+						GA_Text, fwin->message[SSTR_NEXT],
+						GA_TabCycle, TRUE,
+						GA_Disabled, TRUE,
 					ButtonEnd,
 				LayoutEnd,
 				CHILD_WeightedHeight,0,
 			EndGroup,
 		EndWindow;
 
-	fwin->win = (struct Window *)RA_OpenWindow(fwin->objects[OID_MAIN]);
+	fwin->win = (struct Window *)RA_OpenWindow(fwin->objects[OID_S_MAIN]);
 	fwin->gwin = gwin;
 	ami_gui_win_list_add(fwin, AMINS_FINDWINDOW, &ami_search_table);
-	gwin->shared->searchwin = fwin;
+	ami_gui_set_find_window(fwin->gwin, fwin);
 	
-	ActivateLayoutGadget((struct Gadget *)fwin->objects[GID_MAIN], fwin->win,
-			NULL, (ULONG)fwin->objects[GID_SEARCHSTRING]);
+	ActivateLayoutGadget((struct Gadget *)fwin->objects[GID_S_MAIN], fwin->win,
+			NULL, (ULONG)fwin->objects[GID_S_SEARCHSTRING]);
 }
 
 void ami_search_close(void)
 {
-	browser_window_search_clear(fwin->gwin->bw);
-	fwin->gwin->shared->searchwin = NULL;
-	DisposeObject(fwin->objects[OID_MAIN]);
+	browser_window_search_clear(ami_gui_get_browser_window(fwin->gwin));
+	ami_gui_set_find_window(fwin->gwin, NULL);
+	DisposeObject(fwin->objects[OID_S_MAIN]);
+
+	/* Free local charset version of messages */
+	for(int i = 0; i < SSTR_LAST; i++) {
+		ami_utf8_free(fwin->message[i]);
+	}
+
 	ami_gui_win_list_remove(fwin);
 	fwin = NULL;
 }
@@ -213,48 +248,48 @@ static BOOL ami_search_event(void *w)
 	uint16 code;
 	search_flags_t flags;
 
-	while((result = RA_HandleInput(fwin->objects[OID_MAIN],&code)) != WMHI_LASTMSG)
+	while((result = RA_HandleInput(fwin->objects[OID_S_MAIN],&code)) != WMHI_LASTMSG)
 	{
        	switch(result & WMHI_CLASSMASK) // class
 	{
 	case WMHI_GADGETUP:
 		switch(result & WMHI_GADGETMASK)
 		{
-			case GID_SEARCHSTRING:
-				browser_window_search_clear(fwin->gwin->bw);
+			case GID_S_SEARCHSTRING:
+				browser_window_search_clear(ami_gui_get_browser_window(fwin->gwin));
 						
-				RefreshSetGadgetAttrs((struct Gadget *)fwin->objects[GID_PREV],
+				RefreshSetGadgetAttrs((struct Gadget *)fwin->objects[GID_S_PREV],
 					fwin->win, NULL,
 					GA_Disabled, FALSE,
 					TAG_DONE);
 
-				RefreshSetGadgetAttrs((struct Gadget *)fwin->objects[GID_NEXT],
+				RefreshSetGadgetAttrs((struct Gadget *)fwin->objects[GID_S_NEXT],
 					fwin->win, NULL,
 					GA_Disabled, FALSE,
 					TAG_DONE);
 	
 				/* fall through */
 
-			case GID_NEXT:
+			case GID_S_NEXT:
 				search_insert = true;
 				flags = SEARCH_FLAG_FORWARDS |
 					ami_search_flags();
 				browser_window_search(
-						fwin->gwin->bw,
+						ami_gui_get_browser_window(fwin->gwin),
 						NULL,
 						flags, ami_search_string());
-				ActivateWindow(fwin->gwin->shared->win);
+				ActivateWindow(ami_gui_get_window(fwin->gwin));
 			break;
 
-			case GID_PREV:
+			case GID_S_PREV:
 				search_insert = true;
 				flags = ~SEARCH_FLAG_FORWARDS &
 					ami_search_flags();
 				browser_window_search(
-						fwin->gwin->bw,
+						ami_gui_get_browser_window(fwin->gwin),
 						NULL,
 						flags, ami_search_string());
-				ActivateWindow(fwin->gwin->shared->win);
+				ActivateWindow(ami_gui_get_window(fwin->gwin));
 			break;
 		}
 		break;
@@ -299,7 +334,7 @@ void ami_search_set_hourglass(bool active, void *p)
 char *ami_search_string(void)
 {
 	char *text;
-	GetAttr(STRINGA_TextVal,fwin->objects[GID_SEARCHSTRING],(ULONG *)&text);
+	GetAttr(STRINGA_TextVal,fwin->objects[GID_S_SEARCHSTRING],(ULONG *)&text);
 	return text;
 
 }
@@ -325,7 +360,7 @@ void ami_search_add_recent(const char *string, void *p)
 
 void ami_search_set_forward_state(bool active, void *p)
 {
-	RefreshSetGadgetAttrs((struct Gadget *)fwin->objects[GID_NEXT],
+	RefreshSetGadgetAttrs((struct Gadget *)fwin->objects[GID_S_NEXT],
 			fwin->win, NULL,
 			GA_Disabled, active ? FALSE : TRUE, TAG_DONE);
 
@@ -339,7 +374,7 @@ void ami_search_set_forward_state(bool active, void *p)
 
 void ami_search_set_back_state(bool active, void *p)
 {
-	RefreshSetGadgetAttrs((struct Gadget *)fwin->objects[GID_PREV],
+	RefreshSetGadgetAttrs((struct Gadget *)fwin->objects[GID_S_PREV],
 			fwin->win, NULL,
 			GA_Disabled, active ? FALSE : TRUE, TAG_DONE);
 }
@@ -352,8 +387,8 @@ search_flags_t ami_search_flags(void)
 {
 	ULONG case_sensitive, showall;
 	search_flags_t flags;
-	GetAttr(GA_Selected,fwin->objects[GID_CASE],(ULONG *)&case_sensitive);
-	GetAttr(GA_Selected,fwin->objects[GID_SHOWALL],(ULONG *)&showall);
+	GetAttr(GA_Selected,fwin->objects[GID_S_CASE],(ULONG *)&case_sensitive);
+	GetAttr(GA_Selected,fwin->objects[GID_S_SHOWALL],(ULONG *)&showall);
 	flags = 0 | (case_sensitive ? SEARCH_FLAG_CASE_SENSITIVE : 0) |
 			(showall ? SEARCH_FLAG_SHOWALL : 0);
 	return flags;

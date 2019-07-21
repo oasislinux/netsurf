@@ -1,8 +1,14 @@
+#
+# Makefile for NetSurf Framebuffer frontend
+#
+# This file is part of NetSurf 
+#
 # ----------------------------------------------------------------------------
-# Framebuffer target setup
+# Framebuffer flag setup (using pkg-config)
 # ----------------------------------------------------------------------------
 
-CFLAGS += -Dnsframebuffer 
+CFLAGS += -std=c99 -g \
+	  -Dnsframebuffer -Dsmall
 
 #resource path
 CFLAGS += '-DNETSURF_FB_RESPATH="$(NETSURF_FB_RESPATH)"'
@@ -20,25 +26,61 @@ CFLAGS += '-DNETSURF_FB_FONT_MONOSPACE_BOLD="$(NETSURF_FB_FONT_MONOSPACE_BOLD)"'
 CFLAGS += '-DNETSURF_FB_FONT_CURSIVE="$(NETSURF_FB_FONT_CURSIVE)"'
 CFLAGS += '-DNETSURF_FB_FONT_FANTASY="$(NETSURF_FB_FONT_FANTASY)"'
 
-CFLAGS += -std=c99 -g -Dsmall \
-	  -D_BSD_SOURCE \
-	  -D_DEFAULT_SOURCE \
-	  -D_XOPEN_SOURCE=600 \
-	  -D_POSIX_C_SOURCE=200809L
-
 LDFLAGS += -lm
+
+# freetype is optional but older versions do not use pkg-config
+ifeq ($(NETSURF_FB_FONTLIB),freetype)
+  NETSURF_USE_FREETYPE2 := AUTO
+  NETSURF_FEATURE_FREETYPE2_CFLAGS := -DFB_USE_FREETYPE
+
+  $(eval $(call pkg_config_find_and_add_enabled,FREETYPE2,freetype2,freetype2))
+
+  # try and use non pkg-config method
+  ifeq ($(NETSURF_USE_FREETYPE2),NO)
+    FREETYPE_CONFIG_EXISTS := $(shell freetype-config --cflags >/dev/null && echo yes)
+    ifeq ($(FREETYPE_CONFIG_EXISTS),yes)
+      NETSURF_USE_FREETYPE2 := YES
+      CFLAGS += $(shell freetype-config --cflags) $(NETSURF_FEATURE_FREETYPE2_CFLAGS)
+      LDFLAGS += $(shell freetype-config --libs)
+      $(info FT2.CNFG: freetype2 (freetype2)	enabled)
+    else
+      $(info FT2.CNFG: freetype2 (freetype2)	failed)
+      $(error Unable to find library for: freetype2)
+    endif
+  endif
+endif
 
 # non optional pkg-configed libs
 LDFLAGS += -Wl,--whole-archive
 $(eval $(call pkg_config_find_and_add,libnsfb,libnsfb))
 LDFLAGS += -Wl,--no-whole-archive
 
-# freetype is optional but does not use pkg-config
-ifeq ($(NETSURF_FB_FONTLIB),freetype)
-  CFLAGS += -DFB_USE_FREETYPE $(shell freetype-config --cflags)
-  LDFLAGS += $(shell freetype-config --libs)
-endif
+# ---------------------------------------------------------------------------
+# Target setup
+# ---------------------------------------------------------------------------
 
+# The filter and target for split messages
+MESSAGES_FILTER=fb
+MESSAGES_TARGET=$(FRONTEND_RESOURCES_DIR)
+
+# ---------------------------------------------------------------------------
+# HOST specific feature flags
+# ---------------------------------------------------------------------------
+
+# enable POSIX and XSI feature flasg except:
+#   - the default set on freebsd already has them enabled
+#   - openbsd does not require the default source flags
+ifneq ($(HOST),FreeBSD)
+  ifneq ($(HOST),OpenBSD)
+    CFLAGS += -D_POSIX_C_SOURCE=200809L \
+	      -D_XOPEN_SOURCE=700 \
+	      -D_BSD_SOURCE \
+	      -D_DEFAULT_SOURCE \
+	      -D_NETBSD_SOURCE
+  else
+    CFLAGS += -D_POSIX_C_SOURCE=200809L
+  endif
+endif
 
 # ----------------------------------------------------------------------------
 # built-in resource setup
@@ -82,11 +124,16 @@ FB_IMAGE_throbber8 := throbber/throbber8.png
 
 # local compiler flags
 ifeq ($(HOST),OpenBSD)
-    HOST_CFLAGS += $(shell $(PKG_CONFIG) --cflags libpng)
-    HOST_LDFLAGS += $(shell $(PKG_CONFIG) --libs libpng)
+    BUILD_CFLAGS += $(shell $(PKG_CONFIG) --cflags libpng)
+    BUILD_LDFLAGS += $(shell $(PKG_CONFIG) --libs libpng)
 else
-    HOST_CFLAGS +=
-    HOST_LDFLAGS += -lpng
+  ifeq ($(HOST),FreeBSD)
+      BUILD_CFLAGS += $(shell $(PKG_CONFIG) --cflags libpng)
+      BUILD_LDFLAGS += $(shell $(PKG_CONFIG) --libs libpng)
+  else
+      BUILD_CFLAGS +=
+      BUILD_LDFLAGS += -lpng
+  endif
 endif
 
 # Host tool to convert image bitmaps to source code.
@@ -94,8 +141,8 @@ endif
 # convert_image dependd on fb_bitmap.h so that if we change that
 # header, we get new images built.
 $(TOOLROOT)/convert_image: $(TOOLROOT)/created $(FRONTEND_SOURCE_DIR)/convert_image.c $(FRONTEND_SOURCE_DIR)/fbtk.h
-	$(VQ)echo " HOST CC: $@"
-	$(Q)$(HOST_CC) $(HOST_CFLAGS) -o $@ $(FRONTEND_SOURCE_DIR)/convert_image.c $(HOST_LDFLAGS)
+	$(VQ)echo "BUILD CC: $@"
+	$(Q)$(BUILD_CC) $(BUILD_CFLAGS) -o $@ $(FRONTEND_SOURCE_DIR)/convert_image.c $(BUILD_LDFLAGS)
 
 # 1: input file
 # 2: output file
@@ -119,8 +166,8 @@ FB_FONT_internal_ns-sans := fonts/glyph_data
 
 # Internal font conversion
 $(TOOLROOT)/convert_font: $(TOOLROOT)/created $(FRONTEND_SOURCE_DIR)/convert_font.c
-	$(VQ)echo " HOST CC: $@"
-	$(Q)$(HOST_CC) -o $@ $(FRONTEND_SOURCE_DIR)/convert_font.c
+	$(VQ)echo "BUILD CC: $@"
+	$(Q)$(BUILD_CC) -o $@ $(FRONTEND_SOURCE_DIR)/convert_font.c
 
 # 1: input file
 # 2: output source code file
@@ -173,12 +220,13 @@ NETSURF_FRAMEBUFFER_RESOURCE_LIST := adblock.css credits.html	\
 	netsurf.png quirks.css welcome.html maps.html
 
 install-framebuffer:
-	$(Q)$(MKDIR) -p $(DESTDIR)$(NETSURF_FRAMEBUFFER_BIN)
-	$(Q)$(MKDIR) -p $(DESTDIR)$(NETSURF_FRAMEBUFFER_RESOURCES)
-	$(Q)cp -v $(EXETARGET) $(DESTDIR)/$(NETSURF_FRAMEBUFFER_BIN)netsurf-fb
-	$(Q)for F in $(NETSURF_FRAMEBUFFER_RESOURCE_LIST); do cp -vL $(FRONTEND_RESOURCES_DIR)/$$F $(DESTDIR)/$(NETSURF_FRAMEBUFFER_RESOURCES); done
-	$(Q)$(RM) $(DESTDIR)$(NETSURF_FRAMEBUFFER_RESOURCES)messages
-	$(Q)$(SPLIT_MESSAGES) -l en -p fb -f messages -o $(DESTDIR)$(NETSURF_FRAMEBUFFER_RESOURCES)messages -z resources/FatMessages
+	$(VQ)echo " INSTALL: $(DESTDIR)/$(PREFIX)"
+	$(Q)$(INSTALL) -d $(DESTDIR)/$(NETSURF_FRAMEBUFFER_BIN)
+	$(Q)$(INSTALL) -T $(EXETARGET) $(DESTDIR)/$(NETSURF_FRAMEBUFFER_BIN)/netsurf-fb
+	$(Q)$(INSTALL) -d $(DESTDIR)/$(NETSURF_FRAMEBUFFER_RESOURCES)
+	$(Q)for F in $(NETSURF_FRAMEBUFFER_RESOURCE_LIST); do $(INSTALL) -m 644 $(FRONTEND_RESOURCES_DIR)/$$F $(DESTDIR)/$(NETSURF_FRAMEBUFFER_RESOURCES); done
+	$(Q)$(RM) $(DESTDIR)/$(NETSURF_FRAMEBUFFER_RESOURCES)/Messages
+	$(Q)$(SPLIT_MESSAGES) -l en -p fb -f messages -o $(DESTDIR)/$(NETSURF_FRAMEBUFFER_RESOURCES)/Messages -z resources/FatMessages
 
 # ----------------------------------------------------------------------------
 # Package target

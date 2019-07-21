@@ -33,6 +33,7 @@
 #include "content/content_factory.h"
 #include "desktop/search.h" /* search flags enum */
 #include "netsurf/mouse.h" /* mouse state enums */
+#include "netsurf/console.h" /* console state and flags enums */
 
 struct browser_window;
 struct browser_window_features;
@@ -56,6 +57,7 @@ typedef enum {
 
 /** Used in callbacks to indicate what has occurred. */
 typedef enum {
+	CONTENT_MSG_LOG,       /**< Content wishes to log something */
 	CONTENT_MSG_LOADING,   /**< fetching or converting */
 	CONTENT_MSG_READY,     /**< may be displayed */
 	CONTENT_MSG_DONE,      /**< finished */
@@ -69,6 +71,7 @@ typedef enum {
 	CONTENT_MSG_DOWNLOAD,  /**< download, not for display */
 	CONTENT_MSG_LINK,      /**< RFC5988 link */
 	CONTENT_MSG_GETCTX,    /**< Javascript context */
+	CONTENT_MSG_GETDIMS,   /**< Get viewport dimensions. */
 	CONTENT_MSG_SCROLL,    /**< Request to scroll content */
 	CONTENT_MSG_DRAGSAVE,  /**< Allow drag saving of content */
 	CONTENT_MSG_SAVELINK,  /**< Allow URL to be saved */
@@ -95,6 +98,13 @@ struct content_rfc5988_link {
 
 /** Extra data for some content_msg messages. */
 union content_msg_data {
+	/** CONTENT_MSG_LOG - Information for logging */
+	struct {
+		browser_window_console_source src; /**< The source of the logging */
+		const char *msg; /**< The message to log */
+		size_t msglen; /**< The length of that message */
+		browser_window_console_flags flags; /**< The flags of the logging */
+	} log;
 	/** CONTENT_MSG_ERROR - Error message */
 	const char *error;
         /** CONTENT_MSG_ERRORCODE - Error code */
@@ -131,6 +141,12 @@ union content_msg_data {
 	struct content_rfc5988_link *rfc5988_link;
 	/** CONTENT_MSG_GETCTX - Javascript context */
 	struct jscontext **jscontext;
+	/** CONTENT_MSG_GETDIMS - Get the viewport dimensions */
+	struct {
+		/* TODO: Consider getting screen_width, screen_height too. */
+		unsigned *viewport_width;
+		unsigned *viewport_height;
+	} getdims;
 	/** CONTENT_MSG_SCROLL - Part of content to scroll to show */
 	struct {
 		/** if true, scroll to show area given by (x0, y0) and (x1,y1).
@@ -262,10 +278,10 @@ void content_mouse_action(struct hlcache_handle *h, struct browser_window *bw,
 bool content_keypress(struct hlcache_handle *h, uint32_t key);
 
 
-void content_open(struct hlcache_handle *h, struct browser_window *bw,
+nserror content_open(struct hlcache_handle *h, struct browser_window *bw,
 		struct content *page, struct object_params *params);
 
-void content_close(struct hlcache_handle *h);
+nserror content_close(struct hlcache_handle *h);
 
 void content_clear_selection(struct hlcache_handle *h);
 
@@ -387,6 +403,17 @@ bool content_get_quirks(struct hlcache_handle *h);
 bool content_is_locked(struct hlcache_handle *h);
 
 
+/**
+ * Execute some JavaScript code inside a content object.
+ *
+ * Runs the passed in JavaScript code in the content object's context.
+ *
+ * \param h The handle to the content
+ * \param src The JavaScript source code
+ * \param srclen The length of the source code
+ * \return Whether the JS function was successfully injected into the content
+ */
+bool content_exec(struct hlcache_handle *h, const char *src, size_t srclen);
 
 
 #endif

@@ -24,7 +24,6 @@
 #include <proto/intuition.h>
 #include <proto/utility.h>
 #include <proto/icon.h>
-#include <proto/layers.h>
 
 #include <graphics/blitattr.h>
 #include <workbench/icon.h>
@@ -89,7 +88,7 @@ void gui_drag_save_object(struct gui_window *g, struct hlcache_handle *c,
 		break;
 	}
 
-	ami_drag_icon_show(g->shared->win, filetype);
+	ami_drag_icon_show(ami_gui_get_window(g), filetype);
 
 	drag_save_data = c;
 	drag_save_gui = g;
@@ -98,7 +97,7 @@ void gui_drag_save_object(struct gui_window *g, struct hlcache_handle *c,
 
 void gui_drag_save_selection(struct gui_window *g, const char *selection)
 {
-	ami_drag_icon_show(g->shared->win, "ascii");
+	ami_drag_icon_show(ami_gui_get_window(g), "ascii");
 
 	ami_autoscroll = true;
 	drag_save_data = g;
@@ -109,6 +108,7 @@ void ami_drag_save(struct Window *win)
 {
 	ULONG which = WBO_NONE, type;
 	char path[1025], dpath[1025];
+	struct Screen *scrn = ami_gui_get_screen();
 
 	path[0] = 0; /* ensure path is terminated */
 
@@ -134,7 +134,7 @@ void ami_drag_save(struct Window *win)
 	{
 		if(drag_save == GUI_SAVE_TEXT_SELECTION)
 			ami_drag_selection((struct gui_window *)drag_save_data);
-		else DisplayBeep(scrn);
+		else ami_gui_beep();
 
 		drag_save = 0;
 		drag_save_data = NULL;
@@ -143,7 +143,7 @@ void ami_drag_save(struct Window *win)
 
 	if(path[0] == '\0')
 	{
-		DisplayBeep(scrn);
+		ami_gui_beep();
 		drag_save = 0;
 		drag_save_data = NULL;
 		return;
@@ -166,7 +166,7 @@ void ami_drag_save(struct Window *win)
 		case GUI_SAVE_TEXT_SELECTION: // selection
 			AddPart(path,"netsurf_text_selection",1024);
 			struct gui_window *g = (struct gui_window *) drag_save_data;
-			ami_file_save(AMINS_SAVE_SELECTION, path, win, NULL, NULL, g->bw);
+			ami_file_save(AMINS_SAVE_SELECTION, path, win, NULL, NULL, ami_gui_get_browser_window(g));
 		break;
 
 		case GUI_SAVE_COMPLETE:
@@ -174,7 +174,7 @@ void ami_drag_save(struct Window *win)
 			struct hlcache_handle *c = drag_save_data;
 
 			AddPart(path, content_get_title(c), 1024);
-			ami_file_save(AMINS_SAVE_COMPLETE, path, win, c, drag_save_gui->favicon, NULL);
+			ami_file_save(AMINS_SAVE_COMPLETE, path, win, c, ami_gui_get_favicon(drag_save_gui), NULL);
 		}
 		break;
 
@@ -204,7 +204,7 @@ void ami_drag_icon_show(struct Window *win, const char *type)
 	struct DiskObject *dobj = NULL;
 	ULONG width, height;
 	int deftype = WBPROJECT;
-
+	struct Screen *scrn = ami_gui_get_screen();
 	drag_in_progress = TRUE;
 
 	if(nsoption_bool(drag_save_icons) == false)
@@ -255,6 +255,7 @@ void ami_drag_icon_show(struct Window *win, const char *type)
 bool ami_drag_icon_move(void)
 {
 	if(drag_icon == NULL) return FALSE;
+	struct Screen *scrn = ami_gui_get_screen();
 
 	ChangeWindowBox(drag_icon, scrn->MouseX - (drag_icon_width / 2),
 		scrn->MouseY - (drag_icon_height / 2),
@@ -288,44 +289,9 @@ bool ami_drag_has_data(void)
 		else return false;
 }
 
-static void *ami_find_gwin_by_id(struct Window *win, uint32 type)
-{
-	struct nsObject *node, *nnode;
-	struct gui_window_2 *gwin;
-
-	if(!IsMinListEmpty(window_list))
-	{
-		node = (struct nsObject *)GetHead((struct List *)window_list);
-
-		do
-		{
-			nnode=(struct nsObject *)GetSucc((struct Node *)node);
-
-			if(node->Type == type)
-			{
-				gwin = node->objstruct;
-				if(win == gwin->win) return gwin;
-			}
-		} while((node = nnode));
-	}
-	return NULL;
-}
-
-void *ami_window_at_pointer(int type)
-{
-	struct Layer *layer;
-
-	LockLayerInfo(&scrn->LayerInfo);
-
-	layer = WhichLayer(&scrn->LayerInfo, scrn->MouseX, scrn->MouseY);
-
-	UnlockLayerInfo(&scrn->LayerInfo);
-
-	if(layer) return ami_find_gwin_by_id(layer->Window, type);
-		else return NULL;
-}
-
 #else
+#include <stddef.h>
+
 #include "utils/errors.h"
 #include "amiga/drag.h"
 
@@ -363,11 +329,6 @@ BOOL ami_drag_in_progress(void)
 bool ami_drag_has_data(void)
 {
 	return false;
-}
-
-void *ami_window_at_pointer(int type)
-{
-	return NULL;
 }
 #endif
 

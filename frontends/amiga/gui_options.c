@@ -83,7 +83,8 @@
 
 enum
 {
-	GID_OPTS_MAIN = GID_MAIN,
+	OID_MAIN = 0,
+	GID_OPTS_MAIN,
 	GID_OPTS_HOMEPAGE,
 	GID_OPTS_HOMEPAGE_DEFAULT,
 	GID_OPTS_HOMEPAGE_CURRENT,
@@ -656,8 +657,8 @@ void ami_gui_opts_open(void)
 			WA_DragBar, TRUE,
 			WA_CloseGadget, TRUE,
 			WA_SizeGadget, FALSE,
-			WA_PubScreen,scrn,
-			WINDOW_SharedPort,sport,
+			WA_PubScreen, ami_gui_get_screen(),
+			WINDOW_SharedPort, ami_gui_get_shared_msgport(),
 			WINDOW_UserData,gow,
 			WINDOW_IconifyGadget, FALSE,
 			WINDOW_Position, WPOS_CENTERSCREEN,
@@ -2108,10 +2109,10 @@ static BOOL ami_gui_opts_event(void *w)
 			case WMHI_GADGETHELP:
 				if((result & WMHI_GADGETMASK) == 0) {
 					/* Pointer not over our window */
-					ami_help_open(AMI_HELP_MAIN, scrn);
+					ami_help_open(AMI_HELP_MAIN, ami_gui_get_screen());
 				} else {
 					/* TODO: Make this sensitive to the tab the user is currently on */
-					ami_help_open(AMI_HELP_PREFS, scrn);
+					ami_help_open(AMI_HELP_PREFS, ami_gui_get_screen());
 				}
 			break;
 			
@@ -2140,9 +2141,9 @@ static BOOL ami_gui_opts_event(void *w)
 					break;
 
 					case GID_OPTS_HOMEPAGE_CURRENT:
-						if(cur_gw) RefreshSetGadgetAttrs((struct Gadget *)gow->objects[GID_OPTS_HOMEPAGE],
+						if(ami_gui_get_active_gw()) RefreshSetGadgetAttrs((struct Gadget *)gow->objects[GID_OPTS_HOMEPAGE],
 							gow->win, NULL, STRINGA_TextVal,
-							nsurl_access(browser_window_access_url(cur_gw->bw)), TAG_DONE);
+							nsurl_access(browser_window_access_url(ami_gui_get_browser_window(ami_gui_get_active_gw()))), TAG_DONE);
 					break;
 
 					case GID_OPTS_HOMEPAGE_BLANK:

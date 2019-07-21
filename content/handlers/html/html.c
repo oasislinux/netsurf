@@ -570,6 +570,28 @@ static bool html_process_img(html_content *c, dom_node *node)
 	return success;
 }
 
+static void html_get_dimensions(html_content *htmlc)
+{
+	unsigned w;
+	unsigned h;
+	union content_msg_data msg_data = {
+		.getdims = {
+			.viewport_width = &w,
+			.viewport_height = &h,
+		},
+	};
+
+	content_broadcast(&htmlc->base, CONTENT_MSG_GETDIMS, &msg_data);
+
+	htmlc->media.width  = nscss_pixels_physical_to_css(INTTOFIX(w));
+	htmlc->media.height = nscss_pixels_physical_to_css(INTTOFIX(h));
+	htmlc->media.client_font_size =
+			FDIV(INTTOFIX(nsoption_int(font_size)), F_10);
+	htmlc->media.client_line_height =
+			FMUL(nscss_len2px(NULL, htmlc->media.client_font_size,
+					CSS_UNIT_PT, NULL), FLTTOFIX(1.33));
+}
+
 /* exported function documented in html/html_internal.h */
 void html_finish_conversion(html_content *htmlc)
 {
@@ -632,6 +654,8 @@ void html_finish_conversion(html_content *htmlc)
 		return;
 	}
 
+	html_get_dimensions(htmlc);
+
 	error = dom_to_box(html, htmlc, html_box_convert_done);
 	if (error != NSERROR_OK) {
 		NSLOG(netsurf, INFO, "box conversion failed");
@@ -643,6 +667,56 @@ void html_finish_conversion(html_content *htmlc)
 	}
 
 	dom_node_unref(html);
+}
+
+/* handler for a SCRIPT which has been added to a tree */
+static void
+dom_SCRIPT_showed_up(html_content *htmlc, dom_html_script_element *script)
+{
+	dom_exception exc;
+	dom_html_script_element_flags flags;
+	dom_hubbub_error res;
+	bool within;
+
+	if (!htmlc->enable_scripting) {
+		NSLOG(netsurf, INFO, "Encountered a script, but scripting is off, ignoring");
+		return;
+	}
+
+	NSLOG(netsurf, DEEPDEBUG, "Encountered a script, node %p showed up", script);
+
+	exc = dom_html_script_element_get_flags(script, &flags);
+	if (exc != DOM_NO_ERR) {
+		NSLOG(netsurf, DEEPDEBUG, "Unable to retrieve flags, giving up");
+		return;
+	}
+
+	if (flags & DOM_HTML_SCRIPT_ELEMENT_FLAG_PARSER_INSERTED) {
+		NSLOG(netsurf, DEBUG, "Script was parser inserted, skipping");
+		return;
+	}
+
+	exc = dom_node_contains(htmlc->document, script, &within);
+	if (exc != DOM_NO_ERR) {
+		NSLOG(netsurf, DEBUG, "Unable to determine if script was within document, ignoring");
+		return;
+	}
+
+	if (!within) {
+		NSLOG(netsurf, DEBUG, "Script was not within the document, ignoring for now");
+		return;
+	}
+
+	res = html_process_script(htmlc, (dom_node *) script);
+	if (res == DOM_HUBBUB_OK) {
+		NSLOG(netsurf, DEEPDEBUG, "Inserted script has finished running");
+	} else {
+		if (res == (DOM_HUBBUB_HUBBUB_ERR | HUBBUB_PAUSED)) {
+			NSLOG(netsurf, DEEPDEBUG, "Inserted script has launced asynchronously");
+		} else {
+			NSLOG(netsurf, DEEPDEBUG, "Failure starting script");
+		}
+	}
 }
 
 /* callback for DOMNodeInserted end type */
@@ -693,6 +767,9 @@ dom_default_action_DOMNodeInserted_cb(struct dom_event *evt, void *pw)
 			case DOM_HTML_ELEMENT_TYPE_STYLE:
 				html_css_process_style(htmlc, (dom_node *) node);
 				break;
+			case DOM_HTML_ELEMENT_TYPE_SCRIPT:
+				dom_SCRIPT_showed_up(htmlc, (dom_html_script_element *) node);
+				break;
 			default:
 				break;
 			}
@@ -720,7 +797,39 @@ dom_default_action_DOMNodeInserted_cb(struct dom_event *evt, void *pw)
 	}
 }
 
-/* callback for DOMNodeInserted end type */
+/* callback for DOMNodeInsertedIntoDocument end type */
+static void
+dom_default_action_DOMNodeInsertedIntoDocument_cb(struct dom_event *evt, void *pw)
+{
+	html_content *htmlc = pw;
+	dom_event_target *node;
+	dom_node_type type;
+	dom_exception exc;
+
+	exc = dom_event_get_target(evt, &node);
+	if ((exc == DOM_NO_ERR) && (node != NULL)) {
+		exc = dom_node_get_node_type(node, &type);
+		if ((exc == DOM_NO_ERR) && (type == DOM_ELEMENT_NODE)) {
+			/* an element node has been modified */
+			dom_html_element_type tag_type;
+
+			exc = dom_html_element_get_tag_type(node, &tag_type);
+			if (exc != DOM_NO_ERR) {
+				tag_type = DOM_HTML_ELEMENT_TYPE__UNKNOWN;
+			}
+
+			switch (tag_type) {
+			case DOM_HTML_ELEMENT_TYPE_SCRIPT:
+				dom_SCRIPT_showed_up(htmlc, (dom_html_script_element *) node);
+			default:
+				break;
+			}
+		}
+		dom_node_unref(node);
+	}
+}
+
+/* callback for DOMSubtreeModified end type */
 static void
 dom_default_action_DOMSubtreeModified_cb(struct dom_event *evt, void *pw)
 {
@@ -787,11 +896,13 @@ dom_event_fetcher(dom_string *type,
 		  dom_default_action_phase phase,
 		  void **pw)
 {
-	NSLOG(netsurf, DEEPDEBUG, "type:%s", dom_string_data(type));
+	NSLOG(netsurf, DEEPDEBUG, "phase:%d type:%s", phase, dom_string_data(type));
 
 	if (phase == DOM_DEFAULT_ACTION_END) {
 		if (dom_string_isequal(type, corestring_dom_DOMNodeInserted)) {
 			return dom_default_action_DOMNodeInserted_cb;
+		} else if (dom_string_isequal(type, corestring_dom_DOMNodeInsertedIntoDocument)) {
+			return dom_default_action_DOMNodeInsertedIntoDocument_cb;
 		} else if (dom_string_isequal(type, corestring_dom_DOMSubtreeModified)) {
 			return dom_default_action_DOMSubtreeModified_cb;
 		}
@@ -847,6 +958,7 @@ html_create_html_data(html_content *c, const http_parameter *params)
 
 	c->parser = NULL;
 	c->parse_completed = false;
+	c->conversion_begun = false;
 	c->document = NULL;
 	c->quirks = DOM_DOCUMENT_QUIRKS_MODE_NONE;
 	c->encoding = NULL;
@@ -862,6 +974,7 @@ html_create_html_data(html_content *c, const http_parameter *params)
 	c->stylesheet_count = 0;
 	c->stylesheets = NULL;
 	c->select_ctx = NULL;
+	c->media.type = CSS_MEDIA_SCREEN;
 	c->universal = NULL;
 	c->num_objects = 0;
 	c->object_list = NULL;
@@ -948,6 +1061,7 @@ html_create_html_data(html_content *c, const http_parameter *params)
 				     (void *) &old_node_data);
 	if (err != DOM_NO_ERR) {
 		dom_hubbub_parser_destroy(c->parser);
+		c->parser = NULL;
 		nsurl_unref(c->base_url);
 		c->base_url = NULL;
 
@@ -1024,8 +1138,8 @@ html_process_encoding_change(struct content *c,
 	dom_hubbub_parser_params parse_params;
 	dom_hubbub_error error;
 	const char *encoding;
-	const char *source_data;
-	unsigned long source_size;
+	const uint8_t *source_data;
+	size_t source_size;
 
 	/* Retrieve new encoding */
 	encoding = dom_hubbub_parser_get_encoding(html->parser,
@@ -1091,7 +1205,7 @@ html_process_encoding_change(struct content *c,
 	 * it cannot be changed again.
 	 */
 	error = dom_hubbub_parser_parse_chunk(html->parser,
-					      (const uint8_t *)source_data,
+					      source_data,
 					      source_size);
 
 	return libdom_hubbub_error_to_nserror(error);
@@ -1185,14 +1299,17 @@ bool html_can_begin_conversion(html_content *htmlc)
 {
 	unsigned int i;
 
+	/* Cannot begin conversion if we're still fetching stuff */
 	if (htmlc->base.active != 0)
 		return false;
 
 	for (i = 0; i != htmlc->stylesheet_count; i++) {
+		/* Cannot begin conversion if the stylesheets are modified */
 		if (htmlc->stylesheets[i].modified)
 			return false;
 	}
 
+	/* All is good, begin */
 	return true;
 }
 
@@ -1247,8 +1364,11 @@ html_begin_conversion(html_content *htmlc)
 		return false;
 	}
 
-	/* complete script execution */
-	html_script_exec(htmlc);
+	/* Conversion begins proper at this point */
+	htmlc->conversion_begun = true;
+
+	/* complete script execution, including deferred scripts */
+	html_script_exec(htmlc, true);
 
 	/* fire a simple event that bubbles named DOMContentLoaded at
 	 * the Document.
@@ -1416,8 +1536,8 @@ static void html_reformat(struct content *c, int width, int height)
 
 	htmlc->reflowing = true;
 
-	htmlc->len_ctx.vw = width;
-	htmlc->len_ctx.vh = height;
+	htmlc->len_ctx.vw = nscss_pixels_physical_to_css(INTTOFIX(width));
+	htmlc->len_ctx.vh = nscss_pixels_physical_to_css(INTTOFIX(height));
 	htmlc->len_ctx.root_style = htmlc->layout->style;
 
 	layout_document(htmlc, width, height);
@@ -1444,7 +1564,7 @@ static void html_reformat(struct content *c, int width, int height)
 	/* calculate next reflow time at three times what it took to reflow */
 	nsu_getmonotonic_ms(&ms_after);
 
-	ms_interval = (ms_before - ms_after) * 3;
+	ms_interval = (ms_after - ms_before) * 3;
 	if (ms_interval < (nsoption_uint(min_reflow_period) * 10)) {
 		ms_interval = nsoption_uint(min_reflow_period) * 10;
 	}
@@ -1654,7 +1774,7 @@ static nserror html_clone(const struct content *old, struct content **newc)
  * Handle a window containing a CONTENT_HTML being opened.
  */
 
-static void
+static nserror
 html_open(struct content *c,
 	  struct browser_window *bw,
 	  struct content *page,
@@ -1674,6 +1794,8 @@ html_open(struct content *c,
 	html->selection_owner.none = true;
 
 	html_object_open_objects(html, bw);
+
+	return NSERROR_OK;
 }
 
 
@@ -1681,7 +1803,7 @@ html_open(struct content *c,
  * Handle a window containing a CONTENT_HTML being closed.
  */
 
-static void html_close(struct content *c)
+static nserror html_close(struct content *c)
 {
 	html_content *htmlc = (html_content *) c;
 
@@ -1702,6 +1824,8 @@ static void html_close(struct content *c)
 
 	/* remove all object references from the html content */
 	html_object_close_objects(htmlc);
+
+	return NSERROR_OK;
 }
 
 
@@ -2400,6 +2524,90 @@ bool html_get_id_offset(hlcache_handle *h, lwc_string *frag_id, int *x, int *y)
 	return false;
 }
 
+static bool html_exec(struct content *c, const char *src, size_t srclen)
+{
+	html_content *htmlc = (html_content *)c;
+	bool result = false;
+	dom_exception err;
+	dom_html_body_element *body_node;
+	dom_string *dom_src;
+	dom_text *text_node;
+	dom_node *spare_node;
+	dom_html_script_element *script_node;
+
+	if (htmlc->document == NULL) {
+		NSLOG(netsurf, DEEPDEBUG, "Unable to exec, no document");
+		goto out_no_string;
+	}
+
+	err = dom_string_create((const uint8_t *)src, srclen, &dom_src);
+	if (err != DOM_NO_ERR) {
+		NSLOG(netsurf, DEEPDEBUG, "Unable to exec, could not create string");
+		goto out_no_string;
+	}
+
+	err = dom_html_document_get_body(htmlc->document, &body_node);
+	if (err != DOM_NO_ERR) {
+		NSLOG(netsurf, DEEPDEBUG, "Unable to retrieve body element");
+		goto out_no_body;
+	}
+	
+	err = dom_document_create_text_node(htmlc->document, dom_src, &text_node);
+	if (err != DOM_NO_ERR) {
+		NSLOG(netsurf, DEEPDEBUG, "Unable to exec, could not create text node");
+		goto out_no_text_node;
+	}
+	
+	err = dom_document_create_element(htmlc->document, corestring_dom_SCRIPT, &script_node);
+	if (err != DOM_NO_ERR) {
+		NSLOG(netsurf, DEEPDEBUG, "Unable to exec, could not create script node");
+		goto out_no_script_node;
+	}
+	
+	err = dom_node_append_child(script_node, text_node, &spare_node);
+	if (err != DOM_NO_ERR) {
+		NSLOG(netsurf, DEEPDEBUG, "Unable to exec, could not insert code node into script node");
+		goto out_unparented;
+	}
+	dom_node_unref(spare_node); /* We do not need the spare ref at all */
+	
+	err = dom_node_append_child(body_node, script_node, &spare_node);
+	if (err != DOM_NO_ERR) {
+		NSLOG(netsurf, DEEPDEBUG, "Unable to exec, could not insert script node into document body");
+		goto out_unparented;
+	}
+	dom_node_unref(spare_node); /* Again no need for the spare ref */
+	
+	/* We successfully inserted the node into the DOM */
+	
+	result = true;
+	
+	/* Now we unwind, starting by removing the script from wherever it
+	 * ended up parented
+	 */
+	
+	err = dom_node_get_parent_node(script_node, &spare_node);
+	if (err == DOM_NO_ERR && spare_node != NULL) {
+		dom_node *second_spare;
+		err = dom_node_remove_child(spare_node, script_node, &second_spare);
+		if (err == DOM_NO_ERR) {
+			dom_node_unref(second_spare);
+		}
+		dom_node_unref(spare_node);
+	}
+
+out_unparented:
+	dom_node_unref(script_node);
+out_no_script_node:
+	dom_node_unref(text_node);
+out_no_text_node:
+	dom_node_unref(body_node);
+out_no_body:
+	dom_string_unref(dom_src);
+out_no_string:
+	return result;
+}
+
 /**
  * Compute the type of a content
  *
@@ -2442,6 +2650,7 @@ static const content_handler html_content_handler = {
 	.clone = html_clone,
 	.get_encoding = html_encoding,
 	.type = html_content_type,
+	.exec = html_exec,
 	.no_share = true,
 };
 

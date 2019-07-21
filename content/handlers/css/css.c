@@ -80,8 +80,6 @@ typedef struct {
 						 *   imports array */
 } nscss_import_ctx;
 
-static bool nscss_process_data(struct content *c, const char *data,
-		unsigned int size);
 static bool nscss_convert(struct content *c);
 static void nscss_destroy(struct content *c);
 static nserror nscss_clone(const struct content *old, struct content **newc);
@@ -98,7 +96,7 @@ static void nscss_destroy_css_data(struct content_css_data *c);
 
 static void nscss_content_done(struct content_css_data *css, void *pw);
 static css_error nscss_handle_import(void *pw, css_stylesheet *parent,
-		lwc_string *url, uint64_t media);
+		lwc_string *url);
 static nserror nscss_import(hlcache_handle *handle,
 		const hlcache_event *event, void *pw);
 static css_error nscss_import_complete(nscss_import_ctx *ctx);
@@ -245,7 +243,8 @@ static nserror nscss_create_css_data(struct content_css_data *c,
  * \param size  Number of bytes to process
  * \return true on success, false on failure
  */
-bool nscss_process_data(struct content *c, const char *data, unsigned int size)
+static bool
+nscss_process_data(struct content *c, const char *data, unsigned int size)
 {
 	nscss_content *css = (nscss_content *) c;
 	css_error error;
@@ -374,8 +373,8 @@ nserror nscss_clone(const struct content *old, struct content **newc)
 {
 	const nscss_content *old_css = (const nscss_content *) old;
 	nscss_content *new_css;
-	const char *data;
-	unsigned long size;
+	const uint8_t *data;
+	size_t size;
 	nserror error;
 
 	new_css = calloc(1, sizeof(nscss_content));
@@ -402,7 +401,9 @@ nserror nscss_clone(const struct content *old, struct content **newc)
 
 	data = content__get_source_data(&new_css->base, &size);
 	if (size > 0) {
-		if (nscss_process_data(&new_css->base, data, size) == false) {
+		if (nscss_process_data(&new_css->base,
+				       (char *)data,
+				       (unsigned int)size) == false) {
 			content_destroy(&new_css->base);
 			return NSERROR_CLONE_FAILED;
 		}
@@ -512,11 +513,10 @@ void nscss_content_done(struct content_css_data *css, void *pw)
  * \param pw      CSS object requesting the import
  * \param parent  Stylesheet requesting the import
  * \param url     URL of the imported sheet
- * \param media   Applicable media for the imported sheet
  * \return CSS_OK on success, appropriate error otherwise
  */
 css_error nscss_handle_import(void *pw, css_stylesheet *parent,
-		lwc_string *url, uint64_t media)
+		lwc_string *url)
 {
 	content_type accept = CONTENT_CSS;
 	struct content_css_data *c = pw;
@@ -562,7 +562,6 @@ css_error nscss_handle_import(void *pw, css_stylesheet *parent,
 	}
 
 	/* Create content */
-	c->imports[c->import_count].media = media;
 
 	/** \todo Why aren't we getting a relative url part, to join? */
 	nerror = nsurl_create(lwc_string_data(url), &ns_url);

@@ -200,10 +200,10 @@ ami_history_global_drag_end(struct ami_corewindow *ami_cw, int x, int y)
 	}
 	
 	if((ok == false) || (url == NULL)) {
-		DisplayBeep(scrn);
+		ami_gui_beep();
 	} else if(url) {
 		if((gwin = ami_window_at_pointer(AMINS_WINDOW))) {
-			browser_window_navigate(gwin->gw->bw,
+			browser_window_navigate(ami_gui2_get_browser_window(gwin),
 					url,
 					NULL,
 					BW_NAVIGATE_HISTORY,
@@ -233,7 +233,7 @@ HOOKF(void, ami_history_global_menu_item_project_export, APTR, window, struct In
 		ASLFR_Window, ami_cw->win,
 		ASLFR_SleepWindow, TRUE,
 		ASLFR_TitleText, messages_get("NetSurf"),
-		ASLFR_Screen, scrn,
+		ASLFR_Screen, ami_gui_get_screen(),
 		ASLFR_InitialFile, "history.html",
 		TAG_DONE)) {
 			strlcpy(fname, savereq->fr_Drawer, 1024);
@@ -384,7 +384,7 @@ ami_history_global_create_window(struct ami_history_global_window *history_win)
 		WA_Left, nsoption_int(history_window_xpos),
 		WA_Width, nsoption_int(history_window_xsize),
 		WA_Height, nsoption_int(history_window_ysize),
-		WA_PubScreen, scrn,
+		WA_PubScreen, ami_gui_get_screen(),
 		WA_ReportMouse, TRUE,
 		refresh_mode, TRUE,
 		WA_IDCMP, IDCMP_MOUSEMOVE | IDCMP_MOUSEBUTTONS | IDCMP_NEWSIZE |
@@ -393,7 +393,7 @@ ami_history_global_create_window(struct ami_history_global_window *history_win)
 		WINDOW_IDCMPHook, &ami_cw->idcmp_hook,
 		WINDOW_IDCMPHookBits, IDCMP_IDCMPUPDATE | IDCMP_EXTENDEDMOUSE |
 				IDCMP_SIZEVERIFY | IDCMP_REFRESHWINDOW,
-		WINDOW_SharedPort, sport,
+		WINDOW_SharedPort, ami_gui_get_shared_msgport(),
 		WINDOW_HorizProp, 1,
 		WINDOW_VertProp, 1,
 		WINDOW_UserData, history_win,

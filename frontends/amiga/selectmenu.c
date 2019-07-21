@@ -71,10 +71,10 @@ BOOL ami_selectmenu_is_safe(void)
 HOOKF(uint32, ami_popup_hook, Object *, item, APTR)
 {
 	uint32 itemid = 0;
-	struct gui_window *gwin = hook->h_Data;
+	struct form_control *control = hook->h_Data;
 
 	if(GetAttr(PMIA_ID, item, &itemid)) {
-		form_select_process_selection(gwin->shared->control, itemid);
+		form_select_process_selection(control, itemid);
 	}
 
 	return itemid;
@@ -109,9 +109,7 @@ void gui_create_form_select_menu(struct gui_window *g,
 
 	selectmenuhook.h_Entry = ami_popup_hook;
 	selectmenuhook.h_SubEntry = NULL;
-	selectmenuhook.h_Data = g;
-
-	g->shared->control = control;
+	selectmenuhook.h_Data = control;
 
 	selectmenuobj = PMMENU(form_control_get_name(control)),
                         PMA_MenuHandler, &selectmenuhook, End;
@@ -166,9 +164,9 @@ void gui_create_form_select_menu(struct gui_window *g,
 		~0);
 	}
 
-	ami_set_pointer(g->shared, GUI_POINTER_DEFAULT, false); // Clear the menu-style pointer
+	ami_set_pointer(ami_gui_get_gui_window_2(g), GUI_POINTER_DEFAULT, false); // Clear the menu-style pointer
 
-	IDoMethod(selectmenuobj, PM_OPEN, g->shared->win);
+	IDoMethod(selectmenuobj, PM_OPEN, ami_gui_get_window(g));
 
 	/* PM_OPEN is blocking, so dispose menu immediately... */
 	if(selectmenuobj) DisposeObject(selectmenuobj);

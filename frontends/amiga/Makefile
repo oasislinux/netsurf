@@ -12,19 +12,26 @@ endif
 
 $(eval $(call feature_enabled,AMIGA_ICON,-DWITH_AMIGA_ICON,,Amiga icon))
 $(eval $(call feature_enabled,AMIGA_DATATYPES,-DWITH_AMIGA_DATATYPES,,DataTypes))
+$(eval $(call feature_enabled,AMISSL,-DWITH_AMISSL -D__NO_NET_API -D__NO_NETINCLUDE_ERRNO -I$(GCCSDK_INSTALL_ENV)/netinclude,-lamisslauto,AmiSSL))
 
 CFLAGS += -I$(GCCSDK_INSTALL_ENV)/include
 CFLAGS += $(shell $(PKG_CONFIG) --cflags tre)
 
-LDFLAGS += $(shell $(PKG_CONFIG) --static --libs libcurl openssl)
+LDFLAGS += $(shell $(PKG_CONFIG) --static --libs libcurl)
 LDFLAGS += $(shell $(PKG_CONFIG) --libs tre)
 LDFLAGS += -L$(GCCSDK_INSTALL_ENV)/lib
 
 LDFLAGS += -lpbl -liconv
 
+ifeq ($(NETSURF_USE_OPENSSL),YES)
+  LDFLAGS += $(shell $(PKG_CONFIG) --static --libs openssl)
+endif
+
 ifeq ($(SUBTARGET),os3)
   LDFLAGS += -lamiga -lm
 endif
+
+COMMON_WARNFLAGS += -Wno-cast-align
 
 EXETARGET := NetSurf
 
@@ -98,5 +105,5 @@ netsurf.lha: $(EXETARGET)
 	$(Q)cp -p $(AMIGA_PKG_DIR)/netsurf.readme.info $(AMIGA_INSTALL_TARGET_DIR)/NetSurf
   endif
 	$(Q)cd $(AMIGA_INSTALL_TARGET_DIR); \
-	  lha a netsurf.lha NetSurf NetSurf.info AutoInstall
+	  lha ao6 netsurf.lha NetSurf NetSurf.info AutoInstall
 

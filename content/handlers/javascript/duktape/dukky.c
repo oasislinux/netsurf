@@ -19,7 +19,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/** \file
+/**
+ * \file
  * Duktapeish implementation of javascript engine functions.
  */
 
@@ -37,6 +38,7 @@
 #include "javascript/content.h"
 
 #include "duktape/binding.h"
+#include "duktape/generics.js.inc"
 
 #include "duktape.h"
 #include "dukky.h"
@@ -47,6 +49,16 @@
 #define HANDLER_LISTENER_MAGIC MAGIC(HANDLER_LISTENER_MAP)
 #define HANDLER_MAGIC MAGIC(HANDLER_MAP)
 #define EVENT_LISTENER_JS_MAGIC MAGIC(EVENT_LISTENER_JS_MAP)
+#define GENERICS_MAGIC MAGIC(GENERICS_TABLE)
+
+/**
+ * dukky javascript context
+ */
+struct jscontext {
+	duk_context *ctx; /**< duktape base context */
+	duk_context *thread; /**< duktape compartment */
+	uint64_t exec_start_time;
+};
 
 static duk_ret_t dukky_populate_object(duk_context *ctx, void *udata)
 {
@@ -61,7 +73,7 @@ static duk_ret_t dukky_populate_object(duk_context *ctx, void *udata)
 	duk_get_prop(ctx, -2);
 	/* ... obj args prototab {proto/undefined} */
 	if (duk_is_undefined(ctx, -1)) {
-		NSLOG(netsurf, INFO,
+		NSLOG(dukky, WARNING,
 		      "RuhRoh, couldn't find a prototype, HTMLUnknownElement it is");
 		duk_pop(ctx);
 		duk_push_string(ctx, PROTO_NAME(HTMLUNKNOWNELEMENT));
@@ -78,7 +90,7 @@ static duk_ret_t dukky_populate_object(duk_context *ctx, void *udata)
 	/* ... initfn obj[proto] args prototab proto */
 	duk_pop_2(ctx);
 	/* ... initfn obj[proto] args */
-	NSLOG(netsurf, INFO, "Call the init function");
+	NSLOG(dukky, DEEPDEBUG, "Call the init function");
 	duk_call(ctx, nargs + 1);
 	return 1; /* The object */
 }
@@ -86,7 +98,7 @@ static duk_ret_t dukky_populate_object(duk_context *ctx, void *udata)
 duk_ret_t dukky_create_object(duk_context *ctx, const char *name, int args)
 {
 	duk_ret_t ret;
-	NSLOG(netsurf, INFO, "name=%s nargs=%d", name + 2, args);
+	NSLOG(dukky, DEEPDEBUG, "name=%s nargs=%d", name + 2, args);
 	/* ... args */
 	duk_push_object(ctx);
 	/* ... args obj */
@@ -107,7 +119,7 @@ duk_ret_t dukky_create_object(duk_context *ctx, const char *name, int args)
 	if ((ret = duk_safe_call(ctx, dukky_populate_object, NULL, args + 3, 1))
 	    != DUK_EXEC_SUCCESS)
 		return ret;
-	NSLOG(netsurf, INFO, "created");
+	NSLOG(dukky, DEEPDEBUG, "created");
 	return DUK_EXEC_SUCCESS;
 }
 
@@ -147,7 +159,7 @@ dukky_push_node_stacked(duk_context *ctx)
 		if (duk_safe_call(ctx, dukky_populate_object, NULL, 4, 1)
 		    != DUK_EXEC_SUCCESS) {
 			duk_set_top(ctx, top_at_fail);
-			NSLOG(netsurf, INFO, "Boo and also hiss");
+			NSLOG(dukky, ERROR, "Failed to populate object prototype");
 			return false;
 		}
 		/* ... nodeptr klass nodes node */
@@ -163,6 +175,12 @@ dukky_push_node_stacked(duk_context *ctx)
 	/* ... node nodeptr klass nodes */
 	duk_pop_3(ctx);
 	/* ... node */
+	{
+		duk_dup(ctx, -1);
+		const char * what = duk_safe_to_string(ctx, -1);
+		NSLOG(dukky, DEEPDEBUG, "Created: %s", what);
+		duk_pop(ctx);
+	}
 	return true;
 }
 
@@ -385,14 +403,14 @@ dukky_push_node_klass(duk_context *ctx, struct dom_node *node)
 		err = dom_node_get_namespace(node, &namespace);
 		if (err != DOM_NO_ERR) {
 			/* Feck it, element */
-			NSLOG(netsurf, INFO,
+			NSLOG(dukky, ERROR,
 			      "dom_node_get_namespace() failed");
 			duk_push_string(ctx, PROTO_NAME(ELEMENT));
 			break;
 		}
 		if (namespace == NULL) {
 			/* No namespace, -> element */
-			NSLOG(netsurf, INFO, "no namespace");
+			NSLOG(dukky, DEBUG, "no namespace");
 			duk_push_string(ctx, PROTO_NAME(ELEMENT));
 			break;
 		}
@@ -442,7 +460,7 @@ dukky_push_node_klass(duk_context *ctx, struct dom_node *node)
 duk_bool_t
 dukky_push_node(duk_context *ctx, struct dom_node *node)
 {
-	JS_LOG("Pushing node %p", node);
+	NSLOG(dukky, DEEPDEBUG, "Pushing node %p", node);
 	/* First check if we can find the node */
 	/* ... */
 	duk_get_global_string(ctx, NODE_MAGIC);
@@ -457,7 +475,12 @@ dukky_push_node(duk_context *ctx, struct dom_node *node)
 		/* ... node nodes */
 		duk_pop(ctx);
 		/* ... node */
-		JS_LOG("Found it memoised");
+		{
+			duk_dup(ctx, -1);
+			const char * what = duk_safe_to_string(ctx, -1);
+			NSLOG(dukky, DEEPDEBUG, "Found it memoised: %s", what);
+			duk_pop(ctx);
+		}
 		return true;
 	}
 	/* ... nodes undefined */
@@ -522,6 +545,7 @@ static void *dukky_realloc_function(void *udata, void *ptr, duk_size_t size)
 	return realloc(ptr, size);
 }
 
+
 static void dukky_free_function(void *udata, void *ptr)
 {
 	if (ptr != NULL)
@@ -529,15 +553,36 @@ static void dukky_free_function(void *udata, void *ptr)
 }
 
 
-/**************************************** js.h ******************************/
-struct jscontext {
-	duk_context *ctx;
-	duk_context *thread;
-	uint64_t exec_start_time;
-};
-
 #define CTX (ctx->thread)
 
+/**
+ * close current compartment
+ *
+ * \param ctx javascript context
+ * \return NSERROR_OK on sucess.
+ */
+static nserror dukky_closecompartment(jscontext *ctx)
+{
+	/* ensure there is an active compartment */
+	if (ctx->thread == NULL) {
+		return NSERROR_OK;
+	}
+
+	/* Closing down the extant compartment */
+	NSLOG(dukky, DEEPDEBUG, "Closing down extant compartment...");
+	duk_get_global_string(ctx->thread, MAGIC(closedownCompartment));
+	dukky_pcall(CTX, 0, true);
+	NSLOG(dukky, DEEPDEBUG, "Popping the thread off the stack");
+	duk_set_top(ctx->ctx, 0);
+	duk_gc(ctx->ctx, 0);
+	duk_gc(ctx->ctx, DUK_GC_COMPACT);
+
+	ctx->thread = NULL;
+
+	return NSERROR_OK;
+}
+
+/* exported interface documented in js.h */
 void js_initialise(void)
 {
 	/** TODO: Forces JS on for our testing, needs changing before a release
@@ -549,21 +594,22 @@ void js_initialise(void)
 	javascript_init();
 }
 
+
+/* exported interface documented in js.h */
 void js_finalise(void)
 {
 	/* NADA for now */
 }
 
-#define DUKKY_NEW_PROTOTYPE(klass, uklass, klass_name)			\
-	dukky_create_prototype(ctx, dukky_##klass##___proto, PROTO_NAME(uklass), klass_name)
 
-nserror js_newcontext(int timeout, jscallback *cb, void *cbctx,
-		jscontext **jsctx)
+/* exported interface documented in js.h */
+nserror
+js_newcontext(int timeout, jscallback *cb, void *cbctx, jscontext **jsctx)
 {
 	duk_context *ctx;
 	jscontext *ret = calloc(1, sizeof(*ret));
 	*jsctx = NULL;
-	NSLOG(netsurf, INFO, "Creating new duktape javascript context");
+	NSLOG(dukky, DEBUG, "Creating new duktape javascript context");
 	if (ret == NULL) return NSERROR_NOMEM;
 	ctx = ret->ctx = duk_create_heap(
 		dukky_alloc_function,
@@ -584,21 +630,29 @@ nserror js_newcontext(int timeout, jscallback *cb, void *cbctx,
 	return NSERROR_OK;
 }
 
+
+/* exported interface documented in js.h */
 void js_destroycontext(jscontext *ctx)
 {
-	NSLOG(netsurf, INFO, "Destroying duktape javascript context");
+	NSLOG(dukky, DEBUG, "Destroying duktape javascript context");
+	dukky_closecompartment(ctx);
 	duk_destroy_heap(ctx->ctx);
 	free(ctx);
 }
 
+
+/* exported interface documented in js.h */
 jsobject *js_newcompartment(jscontext *ctx, void *win_priv, void *doc_priv)
 {
 	assert(ctx != NULL);
+	NSLOG(dukky, DEBUG,
+	      "New javascript/duktape compartment, win_priv=%p, doc_priv=%p",
+	      win_priv, doc_priv);
+
 	/* Pop any active thread off */
-	NSLOG(netsurf, INFO,
-	      "Yay, new compartment, win_priv=%p, doc_priv=%p", win_priv,
-	      doc_priv);
-	duk_set_top(ctx->ctx, 0);
+	dukky_closecompartment(ctx);
+
+	/* create new compartment thread */
 	duk_push_thread(ctx->ctx);
 	ctx->thread = duk_require_context(ctx->ctx, -1);
 	duk_push_int(CTX, 0);
@@ -624,13 +678,37 @@ jsobject *js_newcompartment(jscontext *ctx, void *win_priv, void *doc_priv)
 	duk_push_object(CTX);
 	duk_put_global_string(CTX, EVENT_MAGIC);
 
-	return (jsobject *)ctx;
-}
+	/* Now load the NetSurf table in */
+	/* ... */
+	duk_push_string(CTX, "generics.js");
+	/* ..., generics.js */
+	if (duk_pcompile_lstring_filename(CTX, DUK_COMPILE_EVAL,
+					  (const char *)generics_js, generics_js_len) != 0) {
+		NSLOG(dukky, CRITICAL, "%s", duk_safe_to_string(CTX, -1));
+		NSLOG(dukky, CRITICAL, "Unable to compile generics.js, compartment aborted");
+		return NULL;
+	}
+	/* ..., (generics.js) */
+	if (dukky_pcall(CTX, 0, true) != 0) {
+		NSLOG(dukky, CRITICAL, "Unable to run generics.js, compartment aborted");
+		return NULL;
+	}
+	/* ..., result */
+	duk_pop(CTX);
+	/* ... */
+	duk_push_global_object(CTX);
+	/* ..., Win */
+	duk_get_prop_string(CTX, -1, "NetSurf");
+	/* ..., Win, NetSurf */
+	duk_put_global_string(CTX, GENERICS_MAGIC);
+	/* ..., Win */
+	duk_del_prop_string(CTX, -1, "NetSurf");
+	duk_pop(CTX);
+	/* ... */
 
-static duk_ret_t eval_top_string(duk_context *ctx, void *udata)
-{
-	duk_eval(ctx);
-	return 0;
+	dukky_log_stack_frame(CTX, "New compartment created");
+
+	return (jsobject *)ctx;
 }
 
 duk_bool_t dukky_check_timeout(void *udata)
@@ -649,37 +727,142 @@ duk_bool_t dukky_check_timeout(void *udata)
 			now > (ctx->exec_start_time + JS_EXEC_TIMEOUT_MS);
 }
 
-bool js_exec(jscontext *ctx, const char *txt, size_t txtlen)
+static duk_ret_t dukky_safe_get(duk_context *ctx, void *udata)
+{
+	duk_get_prop_string(ctx, 0, udata);
+	return 1;
+}
+
+static void dukky_dump_error(duk_context *ctx)
+{
+	/* stack is ..., errobj */
+	duk_idx_t stacktop = duk_get_top(ctx);
+	if (!duk_is_error(ctx, -1)) {
+		NSLOG(dukky, INFO, "Uncaught non-Error derived error in JS: %s", duk_safe_to_string(ctx, -1));
+	} else {
+#define GETTER(what)						\
+		if (duk_has_prop_string(ctx, stacktop - 1, what)) {	\
+			NSLOG(dukky, DEEPDEBUG, "Fetching " what); \
+			duk_dup(ctx, stacktop - 1);			\
+			if (duk_safe_call(ctx, dukky_safe_get, (void *)what, 1, 1) != DUK_EXEC_SUCCESS) { \
+				NSLOG(dukky, DEBUG, "Error fetching " what ": %s", duk_safe_to_string(ctx, -1)); \
+			} else { \
+				NSLOG(dukky, DEEPDEBUG, "Success fetching " what);	\
+			}						\
+		} else {						\
+			NSLOG(dukky, DEBUG, "Faking " what);		\
+			duk_push_string(ctx, "?" what "?");		\
+		}
+		GETTER("name");
+		GETTER("message");
+		GETTER("fileName");
+		GETTER("lineNumber");
+		GETTER("stack");
+		NSLOG(dukky, DEBUG, "Uncaught error in JS: %s: %s",
+		      duk_safe_to_string(ctx, -5), duk_safe_to_string(ctx, -4));
+		NSLOG(dukky, DEBUG, "              was at: %s line %s",
+		duk_safe_to_string(ctx, -3), duk_safe_to_string(ctx, -2));
+		NSLOG(dukky, DEBUG, "         Stack trace: %s",
+		      duk_safe_to_string(ctx, -1));
+#undef GETTER
+	}
+	duk_set_top(ctx, stacktop);
+}
+
+duk_int_t dukky_pcall(duk_context *ctx, duk_size_t argc, bool reset_timeout)
+{
+	if (reset_timeout) {
+		duk_memory_functions funcs;
+		jscontext *jsctx;
+		duk_get_memory_functions(ctx, &funcs);
+		jsctx = funcs.udata;
+		(void) nsu_getmonotonic_ms(&jsctx->exec_start_time);
+	}
+
+	duk_int_t ret = duk_pcall(ctx, argc);
+	if (ret) {
+		/* Something went wrong calling this... */
+		dukky_dump_error(ctx);
+	}
+
+	return ret;
+}
+
+
+void dukky_push_generics(duk_context *ctx, const char *generic)
+{
+	/* ... */
+	duk_get_global_string(ctx, GENERICS_MAGIC);
+	/* ..., generics */
+	duk_get_prop_string(ctx, -1, generic);
+	/* ..., generics, generic */
+	duk_remove(ctx, -2);
+	/* ..., generic */
+}
+
+static duk_int_t dukky_push_context_dump(duk_context *ctx, void *udata)
+{
+	duk_push_context_dump(ctx);
+	return 1;
+}
+
+void dukky_log_stack_frame(duk_context *ctx, const char * reason)
+{
+	if (duk_safe_call(ctx, dukky_push_context_dump, NULL, 0, 1) != 0) {
+		duk_pop(ctx);
+		duk_push_string(ctx, "[???]");
+	}
+	NSLOG(dukky, DEEPDEBUG, "%s, stack is: %s", reason, duk_safe_to_string(ctx, -1));
+	duk_pop(ctx);
+}
+
+
+/* exported interface documented in js.h */
+bool
+js_exec(jscontext *ctx, const uint8_t *txt, size_t txtlen, const char *name)
 {
 	assert(ctx);
-	if (txt == NULL || txtlen == 0) return false;
-	duk_set_top(CTX, 0);
-	duk_push_lstring(CTX, txt, txtlen);
 
-	(void) nsu_getmonotonic_ms(&ctx->exec_start_time);
-	if (duk_safe_call(CTX, eval_top_string, NULL, 1, 1) == DUK_EXEC_ERROR) {
-		duk_get_prop_string(CTX, 0, "name");
-		duk_get_prop_string(CTX, 0, "message");
-		duk_get_prop_string(CTX, 0, "fileName");
-		duk_get_prop_string(CTX, 0, "lineNumber");
-		duk_get_prop_string(CTX, 0, "stack");
-		NSLOG(netsurf, INFO, "Uncaught error in JS: %s: %s",
-		      duk_safe_to_string(CTX, 1), duk_safe_to_string(CTX, 2));
-		NSLOG(netsurf, INFO, "              was at: %s line %s",
-		      duk_safe_to_string(CTX, 3), duk_safe_to_string(CTX, 4));
-		NSLOG(netsurf, INFO, "         Stack trace: %s",
-		      duk_safe_to_string(CTX, 5));
+	if (txt == NULL || txtlen == 0) {
 		return false;
 	}
+
+	duk_set_top(CTX, 0);
+	NSLOG(dukky, DEEPDEBUG, "Running %"PRIsizet" bytes from %s", txtlen, name);
+	/* NSLOG(dukky, DEEPDEBUG, "\n%s\n", txt); */
+
+	(void) nsu_getmonotonic_ms(&ctx->exec_start_time);
+	if (name != NULL) {
+		duk_push_string(CTX, name);
+	} else {
+		duk_push_string(CTX, "?unknown source?");
+	}
+	if (duk_pcompile_lstring_filename(CTX,
+					  DUK_COMPILE_EVAL,
+					  (const char *)txt,
+					  txtlen) != 0) {
+		NSLOG(dukky, DEBUG, "Failed to compile JavaScript input");
+		goto handle_error;
+	}
+
+	if (duk_pcall(CTX, 0/*nargs*/) == DUK_EXEC_ERROR) {
+		NSLOG(dukky, DEBUG, "Failed to execute JavaScript");
+		goto handle_error;
+	}
+
 	if (duk_get_top(CTX) == 0) duk_push_boolean(CTX, false);
-	NSLOG(netsurf, INFO, "Returning %s",
+	NSLOG(dukky, DEEPDEBUG, "Returning %s",
 	      duk_get_boolean(CTX, 0) ? "true" : "false");
 	return duk_get_boolean(CTX, 0);
+
+handle_error:
+	dukky_dump_error(CTX);
+	return false;
 }
 
 /*** New style event handling ***/
 
-static void dukky_push_event(duk_context *ctx, dom_event *evt)
+void dukky_push_event(duk_context *ctx, dom_event *evt)
 {
 	/* ... */
 	duk_get_global_string(ctx, EVENT_MAGIC);
@@ -721,9 +904,18 @@ static void dukky_push_handler_code_(duk_context *ctx, dom_string *name,
 	dom_exception exc;
 	dom_node_type ntype;
 
-	/* Currently safe since libdom has no event targets which are not
-	 * nodes.  Reconsider this as and when we work out how to have
-	 * window do stuff
+	/* If et is NULL, then we're actually dealing with the Window object
+	 * which has no default handlers and no way to assign handlers
+	 * which aren't directly stored in the HANDLER_MAGIC
+	 */
+	if (et == NULL) {
+		duk_push_lstring(ctx, "", 0);
+		return;
+	}
+
+	/* The rest of this assumes et is a proper event target and expands
+	 * out from there based on the assumption that all valid event targets
+	 * are nodes.
 	 */
 	exc = dom_node_get_node_type(et, &ntype);
 	if (exc != DOM_NO_ERR) {
@@ -788,7 +980,7 @@ bool dukky_get_current_value_of_event_handler(duk_context *ctx,
 		/* ... node fullhandlersrc filename */
 		if (duk_pcompile(ctx, DUK_COMPILE_FUNCTION) != 0) {
 			/* ... node err */
-			NSLOG(netsurf, INFO,
+			NSLOG(dukky, DEBUG,
 			      "Unable to proceed with handler, could not compile");
 			duk_pop_2(ctx);
 			return false;
@@ -823,27 +1015,27 @@ static void dukky_generic_event_handler(dom_event *evt, void *pw)
 	duk_get_memory_functions(ctx, &funcs);
 	jsctx = funcs.udata;
 
-	NSLOG(netsurf, INFO, "WOOP WOOP, An event:");
+	NSLOG(dukky, DEBUG, "Handling an event in duktape interface...");
 	exc = dom_event_get_type(evt, &name);
 	if (exc != DOM_NO_ERR) {
-		NSLOG(netsurf, INFO, "Unable to find the event name");
+		NSLOG(dukky, DEBUG, "Unable to find the event name");
 		return;
 	}
-	NSLOG(netsurf, INFO, "Event's name is %*s", dom_string_length(name),
+	NSLOG(dukky, DEBUG, "Event's name is %*s", dom_string_length(name),
 	      dom_string_data(name));
 	exc = dom_event_get_event_phase(evt, &phase);
 	if (exc != DOM_NO_ERR) {
-		NSLOG(netsurf, INFO, "Unable to get event phase");
+		NSLOG(dukky, WARNING, "Unable to get event phase");
 		return;
 	}
-	NSLOG(netsurf, INFO, "Event phase is: %s (%d)",
+	NSLOG(dukky, DEBUG, "Event phase is: %s (%d)",
 	      phase == DOM_CAPTURING_PHASE ? "capturing" : phase == DOM_AT_TARGET ? "at-target" : phase == DOM_BUBBLING_PHASE ? "bubbling" : "unknown",
 	      (int)phase);
 
 	exc = dom_event_get_current_target(evt, &targ);
 	if (exc != DOM_NO_ERR) {
 		dom_string_unref(name);
-		NSLOG(netsurf, INFO, "Unable to find the event target");
+		NSLOG(dukky, DEBUG, "Unable to find the event target");
 		return;
 	}
 
@@ -857,7 +1049,7 @@ static void dukky_generic_event_handler(dom_event *evt, void *pw)
 	if (dukky_push_node(ctx, (dom_node *)targ) == false) {
 		dom_string_unref(name);
 		dom_node_unref(targ);
-		NSLOG(netsurf, INFO,
+		NSLOG(dukky, DEBUG,
 		      "Unable to push JS node representation?!");
 		return;
 	}
@@ -874,11 +1066,11 @@ static void dukky_generic_event_handler(dom_event *evt, void *pw)
 	if (duk_pcall_method(ctx, 1) != 0) {
 		/* Failed to run the method */
 		/* ... err */
-		NSLOG(netsurf, INFO,
+		NSLOG(dukky, DEBUG,
 		      "OH NOES! An error running a callback.  Meh.");
 		exc = dom_event_stop_immediate_propagation(evt);
 		if (exc != DOM_NO_ERR)
-			NSLOG(netsurf, INFO,
+			NSLOG(dukky, DEBUG,
 			      "WORSE! could not stop propagation");
 		duk_get_prop_string(ctx, -1, "name");
 		duk_get_prop_string(ctx, -2, "message");
@@ -886,13 +1078,13 @@ static void dukky_generic_event_handler(dom_event *evt, void *pw)
 		duk_get_prop_string(ctx, -4, "lineNumber");
 		duk_get_prop_string(ctx, -5, "stack");
 		/* ... err name message fileName lineNumber stack */
-		NSLOG(netsurf, INFO, "Uncaught error in JS: %s: %s",
+		NSLOG(dukky, DEBUG, "Uncaught error in JS: %s: %s",
 		      duk_safe_to_string(ctx, -5),
 		      duk_safe_to_string(ctx, -4));
-		NSLOG(netsurf, INFO, "              was at: %s line %s",
+		NSLOG(dukky, INFO, "              was at: %s line %s",
 		      duk_safe_to_string(ctx, -3),
 		      duk_safe_to_string(ctx, -2));
-		NSLOG(netsurf, INFO, "         Stack trace: %s",
+		NSLOG(dukky, INFO, "         Stack trace: %s",
 		      duk_safe_to_string(ctx, -1));
 
 		duk_pop_n(ctx, 6);
@@ -973,11 +1165,11 @@ handle_extras:
 		if (duk_pcall_method(ctx, 1) != 0) {
 			/* Failed to run the method */
 			/* ... copy handler err */
-			NSLOG(netsurf, INFO,
+			NSLOG(dukky, DEBUG,
 			      "OH NOES! An error running a callback.  Meh.");
 			exc = dom_event_stop_immediate_propagation(evt);
 			if (exc != DOM_NO_ERR)
-				NSLOG(netsurf, INFO,
+				NSLOG(dukky, DEBUG,
 				      "WORSE! could not stop propagation");
 			duk_get_prop_string(ctx, -1, "name");
 			duk_get_prop_string(ctx, -2, "message");
@@ -985,14 +1177,14 @@ handle_extras:
 			duk_get_prop_string(ctx, -4, "lineNumber");
 			duk_get_prop_string(ctx, -5, "stack");
 			/* ... err name message fileName lineNumber stack */
-			NSLOG(netsurf, INFO, "Uncaught error in JS: %s: %s",
+			NSLOG(dukky, DEBUG, "Uncaught error in JS: %s: %s",
 			      duk_safe_to_string(ctx, -5),
 			      duk_safe_to_string(ctx, -4));
-			NSLOG(netsurf, INFO,
+			NSLOG(dukky, DEBUG,
 			      "              was at: %s line %s",
 			      duk_safe_to_string(ctx, -3),
 			      duk_safe_to_string(ctx, -2));
-			NSLOG(netsurf, INFO, "         Stack trace: %s",
+			NSLOG(dukky, DEBUG, "         Stack trace: %s",
 			      duk_safe_to_string(ctx, -1));
 
 			duk_pop_n(ctx, 7);
@@ -1023,8 +1215,14 @@ void dukky_register_event_listener_for(duk_context *ctx,
 	dom_exception exc;
 
 	/* ... */
-	if (dukky_push_node(ctx, (struct dom_node *)ele) == false)
-		return;
+	if (ele == NULL) {
+		/* A null element is the Window object */
+		duk_push_global_object(ctx);
+	} else {
+		/* Non null elements must be pushed as a node object */
+		if (dukky_push_node(ctx, (struct dom_node *)ele) == false)
+			return;
+	}
 	/* ... node */
 	duk_get_prop_string(ctx, -1, HANDLER_LISTENER_MAGIC);
 	/* ... node handlers */
@@ -1045,17 +1243,25 @@ void dukky_register_event_listener_for(duk_context *ctx,
 	/* ... node handlers */
 	duk_pop_2(ctx);
 	/* ... */
+	if (ele == NULL) {
+		/* Nothing more to do, Window doesn't register in the
+		 * normal event listener flow
+		 */
+		return;
+	}
+
+	/* Otherwise add an event listener to the element */
 	exc = dom_event_listener_create(dukky_generic_event_handler, ctx,
 					&listen);
 	if (exc != DOM_NO_ERR) return;
 	exc = dom_event_target_add_event_listener(
 		ele, name, listen, capture);
 	if (exc != DOM_NO_ERR) {
-		NSLOG(netsurf, INFO,
+		NSLOG(dukky, DEBUG,
 		      "Unable to register listener for %p.%*s", ele,
 		      dom_string_length(name), dom_string_data(name));
 	} else {
-		NSLOG(netsurf, INFO, "have registered listener for %p.%*s",
+		NSLOG(dukky, DEBUG, "have registered listener for %p.%*s",
 		      ele, dom_string_length(name), dom_string_data(name));
 	}
 	dom_event_listener_unref(listen);
@@ -1223,7 +1429,7 @@ bool js_fire_event(jscontext *ctx, const char *type, struct dom_document *doc, s
 	dom_event *evt;
 	dom_event_target *body;
 
-	NSLOG(netsurf, INFO, "Event: %s (doc=%p, target=%p)", type, doc,
+	NSLOG(dukky, DEBUG, "Event: %s (doc=%p, target=%p)", type, doc,
 	      target);
 
 	/** @todo Make this more generic, this only handles load and only
@@ -1275,10 +1481,14 @@ bool js_fire_event(jscontext *ctx, const char *type, struct dom_document *doc, s
 		/* ... handlers bodynode */
 		if (dukky_get_current_value_of_event_handler(
 			    CTX, corestring_dom_load, body) == false) {
+			/* Unref the body, we don't need it any more */
+			dom_node_unref(body);
 			/* ... handlers */
 			duk_pop(CTX);
 			return true;
 		}
+		/* Unref the body, we don't need it any more */
+		dom_node_unref(body);
 		/* ... handlers handler bodynode */
 		duk_pop(CTX);
 	}
@@ -1295,7 +1505,7 @@ bool js_fire_event(jscontext *ctx, const char *type, struct dom_document *doc, s
 	if (duk_pcall_method(CTX, 1) != 0) {
 		/* Failed to run the handler */
 		/* ... err */
-		NSLOG(netsurf, INFO,
+		NSLOG(dukky, DEBUG,
 		      "OH NOES! An error running a handler.  Meh.");
 		duk_get_prop_string(CTX, -1, "name");
 		duk_get_prop_string(CTX, -2, "message");
@@ -1303,13 +1513,13 @@ bool js_fire_event(jscontext *ctx, const char *type, struct dom_document *doc, s
 		duk_get_prop_string(CTX, -4, "lineNumber");
 		duk_get_prop_string(CTX, -5, "stack");
 		/* ... err name message fileName lineNumber stack */
-		NSLOG(netsurf, INFO, "Uncaught error in JS: %s: %s",
+		NSLOG(dukky, DEBUG, "Uncaught error in JS: %s: %s",
 		      duk_safe_to_string(CTX, -5),
 		      duk_safe_to_string(CTX, -4));
-		NSLOG(netsurf, INFO, "              was at: %s line %s",
+		NSLOG(dukky, DEBUG, "              was at: %s line %s",
 		      duk_safe_to_string(CTX, -3),
 		      duk_safe_to_string(CTX, -2));
-		NSLOG(netsurf, INFO, "         Stack trace: %s",
+		NSLOG(dukky, DEBUG, "         Stack trace: %s",
 		      duk_safe_to_string(CTX, -1));
 
 		duk_pop_n(CTX, 6);

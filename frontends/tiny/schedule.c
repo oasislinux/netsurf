@@ -32,7 +32,7 @@ struct callback {
 	struct callback *next;
 };
 
-static void
+static nserror
 schedule_remove(void (*fn)(void *p), void *p)
 {
 	struct callback *cb, **last;
@@ -42,9 +42,10 @@ schedule_remove(void (*fn)(void *p), void *p)
 		if (cb->fn == fn && cb->p == p) {
 			*last = cb->next;
 			free(cb);
-			break;
+			return NSERROR_OK;
 		}
 	}
+	return NSERROR_NOT_FOUND;
 }
 
 nserror
@@ -53,10 +54,8 @@ tiny_schedule(int delay, void (*fn)(void *p), void *p)
 	struct timespec t;
 	struct callback *cb;
 
-	if (delay < 0) {
-		schedule_remove(fn, p);
-		return NSERROR_OK;
-	}
+	if (delay < 0)
+		return schedule_remove(fn, p);
 	if (clock_gettime(CLOCK_MONOTONIC, &t) < 0)
 		return NSERROR_UNKNOWN;
 	t.tv_sec += delay / 1000;

@@ -45,6 +45,7 @@
 static LONG ami_misc_req(const char *message, uint32 type)
 {
 	LONG ret = 0;
+	struct gui_window *cur_gw = ami_gui_get_active_gw();
 
 	NSLOG(netsurf, INFO, "%s", message);
 #ifdef __amigaos4__
@@ -53,7 +54,7 @@ static LONG ami_misc_req(const char *message, uint32 type)
 		TDR_FormatString, message,
 		TDR_GadgetString, messages_get("OK"),
 		TDR_ImageType, type,
-		TDR_Window, cur_gw ? cur_gw->shared->win : NULL,
+		TDR_Window, cur_gw ? ami_gui_get_window(cur_gw) : NULL,
 		TAG_DONE);
 #else
 	struct EasyStruct easyreq = {
@@ -64,7 +65,7 @@ static LONG ami_misc_req(const char *message, uint32 type)
 		messages_get("OK"),
 	};
 
-	ret = EasyRequest(cur_gw ? cur_gw->shared->win : NULL, &easyreq, NULL);
+	ret = EasyRequest(cur_gw ? ami_gui_get_window(cur_gw) : NULL, &easyreq, NULL);
 #endif
 	return ret;
 }
@@ -237,7 +238,8 @@ static nserror amiga_path_to_nsurl(const char *path, struct nsurl **url_out)
 }
 
 /**
- * returns a string with escape chars translated.
+ * returns a string with escape chars translated
+ * and string converted to local charset
  * (based on remove_underscores from utils.c)
  */
 
@@ -245,6 +247,7 @@ char *translate_escape_chars(const char *s)
 {
 	size_t i, ii, len;
 	char *ret;
+	char *outs;
 	len = strlen(s);
 	ret = malloc(len + 1);
 	if (ret == NULL)
@@ -259,7 +262,10 @@ char *translate_escape_chars(const char *s)
 		}
 	}
 	ret[ii] = '\0';
-	return ret;
+
+	outs = ami_utf8_easy(ret);
+	free(ret);
+	return outs;
 }
 
 /**

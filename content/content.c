@@ -67,12 +67,12 @@ static void content_convert(struct content *c);
 
 nserror content__init(struct content *c, const content_handler *handler,
 		lwc_string *imime_type, const struct http_parameter *params,
-		llcache_handle *llcache, const char *fallback_charset, 
+		llcache_handle *llcache, const char *fallback_charset,
 		bool quirks)
 {
 	struct content_user *user_sentinel;
 	nserror error;
-	
+
 	NSLOG(netsurf, INFO, "url "URL_FMT_SPC" -> %p",
 			nsurl_access_log(llcache_handle_get_url(llcache)), c);
 
@@ -96,6 +96,7 @@ nserror content__init(struct content *c, const content_handler *handler,
 	c->width = 0;
 	c->height = 0;
 	c->available_width = 0;
+	c->available_height = 0;
 	c->quirks = quirks;
 	c->refresh = 0;
 	nsu_getmonotonic_ms(&c->time);
@@ -115,7 +116,7 @@ nserror content__init(struct content *c, const content_handler *handler,
 	content_set_status(c, messages_get("Loading"));
 
 	/* Finally, claim low-level cache events */
-	error = llcache_handle_change_callback(llcache, 
+	error = llcache_handle_change_callback(llcache,
 			content_llcache_callback, c);
 	if (error != NSERROR_OK) {
 		lwc_string_unref(c->mime_type);
@@ -146,8 +147,8 @@ nserror content_llcache_callback(llcache_handle *llcache,
 		break;
 	case LLCACHE_EVENT_HAD_DATA:
 		if (c->handler->process_data != NULL) {
-			if (c->handler->process_data(c, 
-					(const char *) event->data.data.buf, 
+			if (c->handler->process_data(c,
+					(const char *) event->data.data.buf,
 					event->data.data.len) == false) {
 				llcache_handle_abort(c->llcache);
 				c->status = CONTENT_STATUS_ERROR;
@@ -272,7 +273,7 @@ void content_convert(struct content *c)
 
 	if (c->locked == true)
 		return;
-	
+
 	NSLOG(netsurf, INFO, "content "URL_FMT_SPC" (%p)",
 		nsurl_access_log(llcache_handle_get_url(c->llcache)), c);
 
@@ -294,7 +295,7 @@ void content_convert(struct content *c)
 
 void content_set_ready(struct content *c)
 {
-	/* The content must be locked at this point, as it can only 
+	/* The content must be locked at this point, as it can only
 	 * become READY after conversion. */
 	assert(c->locked);
 	c->locked = false;
@@ -355,6 +356,7 @@ void content__reformat(struct content *c, bool background,
 	assert(c->locked == false);
 
 	c->available_width = width;
+	c->available_height = height;
 	if (c->handler->reformat != NULL) {
 
 		c->locked = true;
@@ -543,6 +545,27 @@ void content__request_redraw(struct content *c,
 	content_broadcast(c, CONTENT_MSG_REDRAW, &data);
 }
 
+/* exported interface, documented in content/content.h */
+bool content_exec(struct hlcache_handle *h, const char *src, size_t srclen)
+{
+	struct content *c = hlcache_handle_get_content(h);
+
+	assert(c != NULL);
+
+	if (c->locked) {
+		/* Not safe to do stuff */
+		NSLOG(netsurf, DEEPDEBUG, "Unable to exec, content locked");
+		return false;
+	}
+
+	if (c->handler->exec == NULL) {
+		/* Can't exec something on this content */
+		NSLOG(netsurf, DEEPDEBUG, "Unable to exec, no exec function");
+		return false;
+	}
+
+	return c->handler->exec(c, src, srclen);
+}
 
 /* exported interface, documented in content/content.h */
 bool content_redraw(hlcache_handle *h, struct content_redraw_data *data,
@@ -725,7 +748,7 @@ uint32_t content_count_users(struct content *c)
 	uint32_t counter = 0;
 
 	assert(c != NULL);
-	
+
 	for (user = c->user_list; user != NULL; user = user->next)
 		counter += 1;
 
@@ -803,22 +826,32 @@ void content_broadcast_errorcode(struct content *c, nserror errorcode)
  *
  * \param h	 handle to content that has been opened
  * \param bw	 browser window containing the content
- * \param page   content of type CONTENT_HTML containing h, or 0 if not an
+ * \param page   content of type CONTENT_HTML containing h, or NULL if not an
  *		   object within a page
- * \param params object parameters, or 0 if not an object
+ * \param params object parameters, or NULL if not an object
  *
  * Calls the open function for the content.
  */
 
-void content_open(hlcache_handle *h, struct browser_window *bw,
-		struct content *page, struct object_params *params)
+nserror
+content_open(hlcache_handle *h,
+	     struct browser_window *bw,
+	     struct content *page,
+	     struct object_params *params)
 {
-	struct content *c = hlcache_handle_get_content(h);
+	struct content *c;
+	nserror res;
+
+	c = hlcache_handle_get_content(h);
 	assert(c != 0);
 	NSLOG(netsurf, INFO, "content %p %s", c,
 			nsurl_access_log(llcache_handle_get_url(c->llcache)));
-	if (c->handler->open != NULL)
-		c->handler->open(c, bw, page, params);
+	if (c->handler->open != NULL) {
+		res = c->handler->open(c, bw, page, params);
+	} else {
+		res = NSERROR_OK;
+	}
+	return res;
 }
 
 
@@ -828,14 +861,30 @@ void content_open(hlcache_handle *h, struct browser_window *bw,
  * Calls the close function for the content.
  */
 
-void content_close(hlcache_handle *h)
+nserror content_close(hlcache_handle *h)
 {
-	struct content *c = hlcache_handle_get_content(h);
-	assert(c != 0);
+	struct content *c;
+	nserror res;
+
+	c = hlcache_handle_get_content(h);
+	if (c == NULL) {
+		return NSERROR_BAD_PARAMETER;
+	}
+
+	if ((c->status != CONTENT_STATUS_READY) &&
+	    (c->status != CONTENT_STATUS_DONE)) {
+		/* status is not read or done so nothing to do */
+		return NSERROR_INVALID;
+	}
+
 	NSLOG(netsurf, INFO, "content %p %s", c,
 			nsurl_access_log(llcache_handle_get_url(c->llcache)));
-	if (c->handler->close != NULL)
-		c->handler->close(c);
+	if (c->handler->close != NULL) {
+		res = c->handler->close(c);
+	} else {
+		res = NSERROR_OK;
+	}
+	return res;
 }
 
 
@@ -989,7 +1038,7 @@ content_find_rfc5988_link(hlcache_handle *h, lwc_string *rel)
 }
 
 struct content_rfc5988_link *
-content__free_rfc5988_link(struct content_rfc5988_link *link) 
+content__free_rfc5988_link(struct content_rfc5988_link *link)
 {
 	struct content_rfc5988_link *next;
 
@@ -1014,10 +1063,10 @@ content__free_rfc5988_link(struct content_rfc5988_link *link)
 	return next;
 }
 
-bool content__add_rfc5988_link(struct content *c, 
+bool content__add_rfc5988_link(struct content *c,
 		const struct content_rfc5988_link *link)
 {
-	struct content_rfc5988_link *newlink;	
+	struct content_rfc5988_link *newlink;
 	union content_msg_data msg_data;
 
 	/* a link relation must be present for it to be a link */
@@ -1032,7 +1081,7 @@ bool content__add_rfc5988_link(struct content *c,
 
 	newlink = calloc(1, sizeof(struct content_rfc5988_link));
 	if (newlink == NULL) {
-		return false; 
+		return false;
 	}
 
 	/* copy values */
@@ -1216,27 +1265,21 @@ int content__get_available_width(struct content *c)
 
 
 /* exported interface documented in content/content.h */
-const char *content_get_source_data(hlcache_handle *h, unsigned long *size)
+const uint8_t *content_get_source_data(hlcache_handle *h, size_t *size)
 {
 	return content__get_source_data(hlcache_handle_get_content(h), size);
 }
 
 /* exported interface documented in content/content_protected.h */
-const char *content__get_source_data(struct content *c, unsigned long *size)
+const uint8_t *content__get_source_data(struct content *c, size_t *size)
 {
-	const uint8_t *data;
-	size_t len;
-
 	assert(size != NULL);
 
+	/** \todo check if the content check should be an assert */
 	if (c == NULL)
 		return NULL;
 
-	data = llcache_handle_get_source_data(c->llcache, &len);
-
-	*size = (unsigned long) len;
-
-	return (const char *) data;
+	return llcache_handle_get_source_data(c->llcache, size);
 }
 
 /* exported interface documented in content/content.h */
@@ -1283,9 +1326,9 @@ struct bitmap *content__get_bitmap(struct content *c)
 {
 	struct bitmap *bitmap = NULL;
 
-	if ((c != NULL) && 
-	    (c->handler != NULL) && 
-	    (c->handler->type != NULL) && 
+	if ((c != NULL) &&
+	    (c->handler != NULL) &&
+	    (c->handler->type != NULL) &&
 	    (c->handler->type() == CONTENT_IMAGE) &&
 	    (c->handler->get_internal != NULL) ) {
 		bitmap = c->handler->get_internal(c, NULL);
@@ -1307,14 +1350,14 @@ bool content__get_opaque(struct content *c)
 {
 	bool opaque = false;
 
-	if ((c != NULL) && 
-	    (c->handler != NULL) && 
-	    (c->handler->type != NULL) && 
+	if ((c != NULL) &&
+	    (c->handler != NULL) &&
+	    (c->handler->type != NULL) &&
 	    (c->handler->type() == CONTENT_IMAGE) &&
 	    (c->handler->get_internal != NULL) ) {
 		struct bitmap *bitmap = NULL;
 		bitmap = c->handler->get_internal(c, NULL);
-		if (bitmap != NULL) { 
+		if (bitmap != NULL) {
 			opaque = guit->bitmap->get_opaque(bitmap);
 		}
 	}
@@ -1469,7 +1512,7 @@ nserror content__clone(const struct content *c, struct content *nc)
 	nc->locked = c->locked;
 	nc->total_size = c->total_size;
 	nc->http_code = c->http_code;
-	
+
 	return NSERROR_OK;
 }
 
@@ -1482,11 +1525,10 @@ nserror content__clone(const struct content *c, struct content *nc)
 nserror content_abort(struct content *c)
 {
 	NSLOG(netsurf, INFO, "Aborting %p", c);
-	
+
 	if (c->handler->stop != NULL)
 		c->handler->stop(c);
-	
+
 	/* And for now, abort our llcache object */
 	return llcache_handle_abort(c->llcache);
 }
-

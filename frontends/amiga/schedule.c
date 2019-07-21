@@ -107,7 +107,8 @@ static nserror ami_schedule_add_timer_event(struct nscallback *nscb, int t)
  * A scheduled callback matching both callback and p is returned, or NULL if none present.
  */
 
-static struct nscallback *ami_schedule_locate(void (*callback)(void *p), void *p, bool remove)
+static struct nscallback *
+ami_schedule_locate(void (*callback)(void *p), void *p, bool remove)
 {
 	PblIterator *iterator;
 	struct nscallback *nscb;
@@ -119,7 +120,7 @@ static struct nscallback *ami_schedule_locate(void (*callback)(void *p), void *p
 
 	iterator = pblHeapIterator(schedule_list);
 
-	while ((nscb = pblIteratorNext(iterator)) != -1) {
+	while ((nscb = pblIteratorNext(iterator)) != (void *)-1) {
 		if ((nscb->callback == callback) && (nscb->p == p)) {
 			if (remove == true) pblIteratorRemove(iterator);
 			found_cb = true;
@@ -170,7 +171,11 @@ static nserror schedule_remove(void (*callback)(void *p), void *p, bool abort)
 
 	if(nscb != NULL) {
 		if(abort == true) ami_schedule_remove_timer_event(nscb);
+#ifdef __amigaos4__
 		FreeSysObject(ASOT_IOREQUEST, nscb);
+#else
+		FreeVec(nscb);
+#endif
 		pblHeapConstruct(schedule_list);
 	}
 
@@ -186,11 +191,14 @@ static void schedule_remove_all(void)
 
 	iterator = pblHeapIterator(schedule_list);
 
-	while ((nscb = pblIteratorNext(iterator)) != -1)
-	{
+	while ((nscb = pblIteratorNext(iterator)) != (void *)-1) {
 		ami_schedule_remove_timer_event(nscb);
 		pblIteratorRemove(iterator);
+#ifdef __amigaos4__
 		FreeSysObject(ASOT_IOREQUEST, nscb);
+#else
+		FreeVec(nscb);
+#endif
 	};
 
 	pblIteratorFree(iterator);
@@ -218,18 +226,17 @@ static void ami_schedule_dump(void)
 	GetSysTime(&tv);
 	Amiga2Date(tv.Seconds, &clockdata);
 	
-	NSLOG(netsurf, INFO, "Current time = %d-%d-%d %d:%d:%d.%d",
+	NSLOG(netsurf, INFO, "Current time = %d-%d-%d %d:%d:%d.%lu",
 	      clockdata.mday, clockdata.month, clockdata.year,
 	      clockdata.hour, clockdata.min, clockdata.sec, tv.Microseconds);
 	NSLOG(netsurf, INFO, "Events remaining in queue:");
 
 	iterator = pblHeapIterator(schedule_list);
 
-	while ((nscb = pblIteratorNext(iterator)) != -1)
-	{
+	while ((nscb = pblIteratorNext(iterator)) != (void *)-1) {
 		Amiga2Date(nscb->tv.Seconds, &clockdata);
 		NSLOG(netsurf, INFO,
-		      "nscb: %p, at %d-%d-%d %d:%d:%d.%d, callback: %p, %p",
+		      "nscb: %p, at %d-%d-%d %d:%d:%d.%lu, callback: %p, %p",
 		      nscb, clockdata.mday, clockdata.month, clockdata.year,
 		      clockdata.hour, clockdata.min, clockdata.sec,
 		      nscb->tv.Microseconds, nscb->callback, nscb->p);
@@ -299,7 +306,10 @@ nserror ami_schedule_create(struct MsgPort *msgport)
 	schedule_msgport = msgport;
 #endif
 	schedule_list = pblHeapNew();
-	if(schedule_list == PBL_ERROR_OUT_OF_MEMORY) return NSERROR_NOMEM;
+
+	if (schedule_list == NULL) {
+		return NSERROR_NOMEM;
+	}
 
 	pblHeapSetCompareFunction(schedule_list, ami_schedule_compare);
 
@@ -335,11 +345,13 @@ nserror ami_schedule(int t, void (*callback)(void *p), void *p)
 	nscb = AllocSysObjectTags(ASOT_IOREQUEST,
 							ASOIOR_Duplicate, tioreq,
 							TAG_DONE);
+	if(nscb == NULL) return NSERROR_NOMEM;
 #else
-	nscb = (struct nscallback *)CreateIORequest(schedule_msgport, sizeof(struct nscallback));
+	if(schedule_msgport == NULL) return NSERROR_NOMEM;
+	nscb = AllocVec(sizeof(struct nscallback), MEMF_PUBLIC | MEMF_CLEAR);
+	if(nscb == NULL) return NSERROR_NOMEM;
 	*nscb = *tioreq;
 #endif
-	if(!nscb) return NSERROR_NOMEM;
 
 	if (ami_schedule_add_timer_event(nscb, t) != NSERROR_OK)
 		return NSERROR_NOMEM;

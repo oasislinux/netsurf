@@ -139,7 +139,7 @@ get_login_description(struct nsurl *url,
 	NSLOG(netsurf, INFO,
 	      "key:%s url:%s realm:%s str:%s", key, url_s, realm, str);
 
-	if (strcmp(key, str) != 0) {
+	if ((str != NULL) && (strcmp(key, str) != 0)) {
 		*out_str = str;
 	} else {
 		/* no message so fallback */
@@ -258,12 +258,15 @@ create_login_window(nsurl *url,
 
 
 /* exported function documented in gtk/login.h */
-nserror gui_401login_open(nsurl *url, const char *realm,
-		const char *username, const char *password,
-		nserror (*cb)(const char *username,
+nserror
+gui_401login_open(nsurl *url,
+		  const char *realm,
+		  const char *username,
+		  const char *password,
+		  nserror (*cb)(const char *username,
 				const char *password,
 				void *pw),
-		void *cbpw)
+		  void *cbpw)
 {
 	lwc_string *host;
 	nserror res;

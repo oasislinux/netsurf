@@ -17,8 +17,9 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/** \file
- * Content for image/jpeg (implementation).
+/**
+ * \file
+ * implementation of content handling for image/jpeg
  *
  * This implementation uses the IJG JPEG library.
  */
@@ -161,11 +162,14 @@ static void nsjpeg_error_exit(j_common_ptr cinfo)
 	longjmp(*setjmp_buffer, 1);
 }
 
+/**
+ * create a bitmap from jpeg content.
+ */
 static struct bitmap *
 jpeg_cache_convert(struct content *c)
 {
-	uint8_t *source_data; /* Jpeg source data */
-	unsigned long source_size; /* length of Jpeg source data */
+	const uint8_t *source_data; /* Jpeg source data */
+	size_t source_size; /* length of Jpeg source data */
 	struct jpeg_decompress_struct cinfo;
 	struct jpeg_error_mgr jerr;
 	jmp_buf setjmp_buffer;
@@ -184,7 +188,7 @@ jpeg_cache_convert(struct content *c)
 		nsjpeg_term_source };
 
 	/* obtain jpeg source data and perfom minimal sanity checks */
-	source_data = (uint8_t *)content__get_source_data(c, &source_size);
+	source_data = content__get_source_data(c, &source_size);
 
 	if ((source_data == NULL) ||
 	    (source_size < MIN_JPEG_SIZE)) {
@@ -311,8 +315,8 @@ static bool nsjpeg_convert(struct content *c)
 		nsjpeg_skip_input_data, jpeg_resync_to_restart,
 		nsjpeg_term_source };
 	union content_msg_data msg_data;
-	const char *data;
-	unsigned long size;
+	const uint8_t *data;
+	size_t size;
 	char *title;
 
 	/* check image header is valid and get width/height */

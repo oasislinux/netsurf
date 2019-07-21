@@ -20,6 +20,6 @@
 
 #include "desktop/version.h"
 
-const char * const netsurf_version = "3.8 (29th August 2018)";
+const char * const netsurf_version = "3.9 (17th July 2019)";
 const int netsurf_version_major = 3;
-const int netsurf_version_minor = 8;
+const int netsurf_version_minor = 9;

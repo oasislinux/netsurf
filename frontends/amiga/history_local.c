@@ -81,11 +81,20 @@ ami_history_local_destroy(struct ami_history_local_window *history_local_win)
 
 	res = local_history_fini(history_local_win->session);
 	if (res == NSERROR_OK) {
-		history_local_win->gw->hw = NULL;
+		ami_gui_set_history_window(history_local_win->gw, NULL);
 		res = ami_corewindow_fini(&history_local_win->core); /* closes the window for us */
 		history_local_window = NULL;
 	}
 	return res;
+}
+
+static void ami_history_local_destroy_cw(struct ami_corewindow *ami_cw)
+{
+	struct ami_history_local_window *history_local_win;
+	/* technically degenerate container of */
+	history_local_win = (struct ami_history_local_window *)ami_cw;
+
+	ami_history_local_destroy(history_local_win);
 }
 
 /**
@@ -200,7 +209,7 @@ ami_history_local_create_window(struct ami_history_local_window *history_local_w
 		WA_SizeBRight, TRUE,
 		WA_Width, 100,
 		WA_Height, 100,
-		WA_PubScreen, scrn,
+		WA_PubScreen, ami_gui_get_screen(),
 		WA_ReportMouse, TRUE,
 		refresh_mode, TRUE,
 		WA_IDCMP, IDCMP_MOUSEMOVE | IDCMP_MOUSEBUTTONS | IDCMP_NEWSIZE |
@@ -209,7 +218,7 @@ ami_history_local_create_window(struct ami_history_local_window *history_local_w
 		WINDOW_IDCMPHook, &ami_cw->idcmp_hook,
 		WINDOW_IDCMPHookBits, IDCMP_IDCMPUPDATE | IDCMP_EXTENDEDMOUSE |
 				IDCMP_SIZEVERIFY | IDCMP_REFRESHWINDOW,
-		WINDOW_SharedPort, sport,
+		WINDOW_SharedPort, ami_gui_get_shared_msgport(),
 		WINDOW_HorizProp, 1,
 		WINDOW_VertProp, 1,
 		WINDOW_UserData, history_local_win,
@@ -244,8 +253,8 @@ nserror ami_history_local_present(struct gui_window *gw)
 	if(history_local_window != NULL) {
 		//windowtofront()
 
-		if (gw->hw != NULL) {
-			res = local_history_set(gw->hw->session, gw->bw);
+		if (ami_gui_get_history_window(gw) != NULL) {
+			res = local_history_set(ami_gui_get_history_window(gw)->session, ami_gui_get_browser_window(gw));
 			return res;
 		}
 
@@ -271,7 +280,7 @@ nserror ami_history_local_present(struct gui_window *gw)
 	ncwin->core.draw = ami_history_local_draw;
 	ncwin->core.key = ami_history_local_key;
 	ncwin->core.mouse = ami_history_local_mouse;
-	ncwin->core.close = ami_history_local_destroy;
+	ncwin->core.close = ami_history_local_destroy_cw;
 	ncwin->core.event = NULL;
 	ncwin->core.drag_end = NULL;
 	ncwin->core.icon_drop = NULL;
@@ -286,7 +295,7 @@ nserror ami_history_local_present(struct gui_window *gw)
 
 	res = local_history_init(ncwin->core.cb_table,
 				 (struct core_window *)ncwin,
-				 gw->bw,
+				 ami_gui_get_browser_window(gw),
 				 &ncwin->session);
 	if (res != NSERROR_OK) {
 		ami_utf8_free(ncwin->core.wintitle);
@@ -308,7 +317,7 @@ nserror ami_history_local_present(struct gui_window *gw)
 
 	ncwin->gw = gw;
 	history_local_window = ncwin;
-	gw->hw = ncwin;
+	ami_gui_set_history_window(gw, ncwin);
 
 	return NSERROR_OK;
 }

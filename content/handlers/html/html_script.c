@@ -42,7 +42,7 @@
 #include "html/html.h"
 #include "html/html_internal.h"
 
-typedef bool (script_handler_t)(struct jscontext *jscontext, const char *data, size_t size) ;
+typedef bool (script_handler_t)(struct jscontext *jscontext, const uint8_t *data, size_t size, const char *name);
 
 
 static script_handler_t *select_script_handler(content_type ctype)
@@ -55,7 +55,7 @@ static script_handler_t *select_script_handler(content_type ctype)
 
 
 /* exported internal interface documented in html/html_internal.h */
-nserror html_script_exec(html_content *c)
+nserror html_script_exec(html_content *c, bool allow_defer)
 {
 	unsigned int i;
 	struct html_script *s;
@@ -71,7 +71,7 @@ nserror html_script_exec(html_content *c)
 		}
 
 		if ((s->type == HTML_SCRIPT_ASYNC) ||
-		    (s->type == HTML_SCRIPT_DEFER)) {
+		    (allow_defer && (s->type == HTML_SCRIPT_DEFER))) {
 			/* ensure script content is present */
 			if (s->data.handle == NULL)
 				continue;
@@ -90,11 +90,17 @@ nserror html_script_exec(html_content *c)
 			if (content_get_status(s->data.handle) ==
 					CONTENT_STATUS_DONE) {
 				/* external script is now available */
-				const char *data;
-				unsigned long size;
+				const uint8_t *data;
+				size_t size;
 				data = content_get_source_data(
 						s->data.handle, &size );
-				script_handler(c->jscontext, data, size);
+				script_handler(c->jscontext, data, size,
+					       nsurl_access(hlcache_handle_get_url(s->data.handle)));
+				/* We have to re-acquire this here since the
+				 * c->scripts array may have been reallocated
+				 * as a result of executing this script.
+				 */
+				s = &(c->scripts[i]);
 
 				s->already_started = true;
 
@@ -200,6 +206,13 @@ convert_script_async_cb(hlcache_handle *script,
 		html_begin_conversion(parent);
 	}
 
+	/* if we have already started converting though, then we can handle the
+	 * scripts as they come in.
+	 */
+	else if (parent->conversion_begun) {
+		html_script_exec(parent, false);
+	}
+
 	return NSERROR_OK;
 }
 
@@ -297,16 +310,19 @@ convert_script_sync_cb(hlcache_handle *script,
 		script_handler = select_script_handler(content_get_type(s->data.handle));
 		if (script_handler != NULL && parent->jscontext != NULL) {
 			/* script has a handler */
-			const char *data;
-			unsigned long size;
+			const uint8_t *data;
+			size_t size;
 			data = content_get_source_data(s->data.handle, &size );
-			script_handler(parent->jscontext, data, size);
+			script_handler(parent->jscontext, data, size,
+				       nsurl_access(hlcache_handle_get_url(s->data.handle)));
 		}
 
 		/* continue parse */
-		err = dom_hubbub_parser_pause(parent->parser, false);
-		if (err != DOM_HUBBUB_OK) {
-			NSLOG(netsurf, INFO, "unpause returned 0x%x", err);
+		if (parent->parser != NULL) {
+			err = dom_hubbub_parser_pause(parent->parser, false);
+			if (err != DOM_HUBBUB_OK) {
+				NSLOG(netsurf, INFO, "unpause returned 0x%x", err);
+			}
 		}
 
 		break;
@@ -328,9 +344,11 @@ convert_script_sync_cb(hlcache_handle *script,
 		s->already_started = true;
 
 		/* continue parse */
-		err = dom_hubbub_parser_pause(parent->parser, false);
-		if (err != DOM_HUBBUB_OK) {
-			NSLOG(netsurf, INFO, "unpause returned 0x%x", err);
+		if (parent->parser != NULL) {
+			err = dom_hubbub_parser_pause(parent->parser, false);
+			if (err != DOM_HUBBUB_OK) {
+				NSLOG(netsurf, INFO, "unpause returned 0x%x", err);
+			}
 		}
 
 		break;
@@ -400,6 +418,12 @@ exec_src_script(html_content *c,
 	exc = dom_element_has_attribute(node, corestring_dom_async, &async);
 	if (exc != DOM_NO_ERR) {
 		return DOM_HUBBUB_OK; /* dom error */
+	}
+
+	if (c->parse_completed) {
+		/* After parse completed, all scripts are essentially async */
+		async = true;
+		defer = false;
 	}
 
 	if (async) {
@@ -513,8 +537,9 @@ exec_inline_script(html_content *c, dom_node *node, dom_string *mimetype)
 
 	if (script_handler != NULL) {
 		script_handler(c->jscontext,
-			       dom_string_data(script),
-			       dom_string_byte_length(script));
+			       (const uint8_t *)dom_string_data(script),
+			       dom_string_byte_length(script),
+			       "?inline script?");
 	}
 	return DOM_HUBBUB_OK;
 }
@@ -580,16 +605,21 @@ nserror html_script_free(html_content *html)
 			dom_string_unref(html->scripts[i].mimetype);
 		}
 
-		if ((html->scripts[i].type == HTML_SCRIPT_INLINE) &&
-		    (html->scripts[i].data.string != NULL)) {
-
-			dom_string_unref(html->scripts[i].data.string);
-
-		} else if ((html->scripts[i].type == HTML_SCRIPT_SYNC) &&
-			   (html->scripts[i].data.handle != NULL)) {
-
-			hlcache_handle_release(html->scripts[i].data.handle);
-
+		switch (html->scripts[i].type) {
+		case HTML_SCRIPT_INLINE:
+			if (html->scripts[i].data.string != NULL) {
+				dom_string_unref(html->scripts[i].data.string);
+			}
+			break;
+		case HTML_SCRIPT_SYNC:
+			/* fallthrough */
+		case HTML_SCRIPT_ASYNC:
+			/* fallthrough */
+		case HTML_SCRIPT_DEFER:
+			if (html->scripts[i].data.handle != NULL) {
+				hlcache_handle_release(html->scripts[i].data.handle);
+			}
+			break;
 		}
 	}
 	free(html->scripts);

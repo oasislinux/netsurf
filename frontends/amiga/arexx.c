@@ -191,9 +191,9 @@ static struct gui_window *ami_find_tab_gwin(struct gui_window_2 *gwin, int tab)
 	struct Node *ntab;
 	struct gui_window *gw;
 
-	if((tab == 0) || (gwin->tabs == 0)) return gwin->gw;
+	if((tab == 0) || (ami_gui2_get_tabs(gwin) == 0)) return ami_gui2_get_gui_window(gwin);
 
-	ctab = GetHead(&gwin->tab_list);
+	ctab = GetHead(ami_gui2_get_tab_list(gwin));
 
 	do
 	{
@@ -215,9 +215,9 @@ static int ami_find_tab_bw(struct gui_window_2 *gwin, struct browser_window *bw)
 	struct Node *ntab;
 	struct gui_window *tgw = NULL;
 
-	if((bw == NULL) || (gwin->tabs == 0)) return 1;
+	if((bw == NULL) || (ami_gui2_get_tabs(gwin) == 0)) return 1;
 
-	ctab = GetHead(&gwin->tab_list);
+	ctab = GetHead(ami_gui2_get_tab_list(gwin));
 
 	do
 	{
@@ -226,7 +226,7 @@ static int ami_find_tab_bw(struct gui_window_2 *gwin, struct browser_window *bw)
 		GetClickTabNodeAttrs(ctab,
 							TNA_UserData, &tgw,
 							TAG_DONE);
-		if(tgw->bw == bw) return tabs;
+		if(ami_gui_get_browser_window(tgw) == bw) return tabs;
 	} while((ctab=ntab));
 
 	return 0;
@@ -235,6 +235,7 @@ static int ami_find_tab_bw(struct gui_window_2 *gwin, struct browser_window *bw)
 static struct gui_window *ami_find_tab(int window, int tab)
 {
 	struct nsObject *node, *nnode;
+	struct MinList *window_list = ami_gui_get_window_list();
 
 	if(!IsMinListEmpty(window_list))
 	{
@@ -260,7 +261,7 @@ static struct gui_window *ami_find_tab(int window, int tab)
 RXHOOKF(rx_open)
 {
 	struct dlnode *dln;
-	struct gui_window *gw = cur_gw;
+	struct gui_window *gw = ami_gui_get_active_gw();
 	nsurl *url;
 
 	cmd->ac_RC = 0;
@@ -281,8 +282,8 @@ RXHOOKF(rx_open)
 		dln->filename = strdup((char *)cmd->ac_ArgList[3]);
 		dln->node.ln_Name = strdup((char *)cmd->ac_ArgList[0]);
 		dln->node.ln_Type = NT_USER;
-		AddTail(&gw->dllist, (struct Node *)dln);
-		browser_window_navigate(gw->bw,
+		AddTail(ami_gui_get_download_list(gw), (struct Node *)dln);
+		browser_window_navigate(ami_gui_get_browser_window(gw),
 				url,
 				NULL,
 				BW_NAVIGATE_DOWNLOAD,
@@ -303,11 +304,11 @@ RXHOOKF(rx_open)
 				      BW_CREATE_TAB,
 				      url,
 				      NULL,
-				      gw->bw,
+				      ami_gui_get_browser_window(gw),
 				      NULL);
 
 			if(cmd->ac_ArgList[6]) {
-				ami_gui_switch_to_new_tab(gw->shared);
+				ami_gui_switch_to_new_tab(ami_gui_get_gui_window_2(gw));
 			}
 		}
 	}
@@ -323,7 +324,7 @@ RXHOOKF(rx_open)
 	{
 		if(gw)
 		{
-			browser_window_navigate(gw->bw,
+			browser_window_navigate(ami_gui_get_browser_window(gw),
 					url,
 					NULL,
 					BW_NAVIGATE_HISTORY,
@@ -346,9 +347,7 @@ RXHOOKF(rx_open)
 RXHOOKF(rx_save)
 {
 	BPTR fh = 0;
-	ULONG source_size;
-	const char *source_data;
-	struct gui_window *gw = cur_gw;
+	struct gui_window *gw = ami_gui_get_active_gw();
 
 	cmd->ac_RC = 0;
 
@@ -357,19 +356,23 @@ RXHOOKF(rx_save)
 
 	if(!gw) return;
 
-	ami_set_pointer(gw->shared, GUI_POINTER_WAIT, false);
+	ami_set_pointer(ami_gui_get_gui_window_2(gw), GUI_POINTER_WAIT, false);
 					
 	if((fh = FOpen((char *)cmd->ac_ArgList[0], MODE_NEWFILE, 0)))
 	{
-		struct hlcache_handle *h = browser_window_get_content(gw->bw);
-		if((source_data = content_get_source_data(h, &source_size)))
+		const uint8_t *source_data;
+		size_t source_size;
+		struct hlcache_handle *h = browser_window_get_content(ami_gui_get_browser_window(gw));
+		source_data = content_get_source_data(h, &source_size);
+		if (source_data != NULL) {
 			FWrite(fh, source_data, 1, source_size);
+		}
 
 		FClose(fh);
-		SetComment((char *)cmd->ac_ArgList[0], nsurl_access(browser_window_access_url(gw->bw)));
+		SetComment((char *)cmd->ac_ArgList[0], nsurl_access(browser_window_access_url(ami_gui_get_browser_window(gw))));
 	}
 
-	ami_reset_pointer(gw->shared);
+	ami_reset_pointer(ami_gui_get_gui_window_2(gw));
 }
 
 RXHOOKF(rx_quit)
@@ -381,21 +384,21 @@ RXHOOKF(rx_quit)
 RXHOOKF(rx_tofront)
 {
 	cmd->ac_RC = 0;
-	ScreenToFront(scrn);
+	ScreenToFront(ami_gui_get_screen());
 }
 
 RXHOOKF(rx_geturl)
 {
-	struct gui_window *gw = cur_gw;
+	struct gui_window *gw = ami_gui_get_active_gw();
 
 	cmd->ac_RC = 0;
 
 	if((cmd->ac_ArgList[0]) && (cmd->ac_ArgList[1]))
 		gw = ami_find_tab(*(ULONG *)cmd->ac_ArgList[0], *(ULONG *)cmd->ac_ArgList[1]);
 
-	if(gw && gw->bw)
+	if(gw && ami_gui_get_browser_window(gw))
 	{
-		strcpy(result, nsurl_access(browser_window_access_url(gw->bw)));
+		strcpy(result, nsurl_access(browser_window_access_url(ami_gui_get_browser_window(gw))));
 	}
 	else
 	{
@@ -407,7 +410,7 @@ RXHOOKF(rx_geturl)
 
 RXHOOKF(rx_gettitle)
 {
-	struct gui_window *gw = cur_gw;
+	struct gui_window *gw = ami_gui_get_active_gw();
 
 	cmd->ac_RC = 0;
 
@@ -416,10 +419,10 @@ RXHOOKF(rx_gettitle)
 
 	if(gw)
 	{
-		if(gw->shared->tabs > 1)
-			strcpy(result, gw->tabtitle);
+		if(ami_gui2_get_tabs(ami_gui_get_gui_window_2(gw)) > 1)
+			strcpy(result, ami_gui_get_tab_title(gw));
 		else
-			strcpy(result, gw->shared->wintitle);
+			strcpy(result, ami_gui_get_win_title(gw));
 	}
 	else
 	{
@@ -513,32 +516,32 @@ RXHOOKF(rx_pubscreen)
 
 RXHOOKF(rx_back)
 {
-	struct gui_window *gw = cur_gw;
+	struct gui_window *gw = ami_gui_get_active_gw();
 
 	cmd->ac_RC = 0;
 
 	if((cmd->ac_ArgList[0]) && (cmd->ac_ArgList[1]))
 		gw = ami_find_tab(*(ULONG *)cmd->ac_ArgList[0], *(ULONG *)cmd->ac_ArgList[1]);
 
-	if(gw) ami_gui_history(gw->shared, true);
+	if(gw) ami_gui_history(ami_gui_get_gui_window_2(gw), true);
 }
 
 RXHOOKF(rx_forward)
 {
-	struct gui_window *gw = cur_gw;
+	struct gui_window *gw = ami_gui_get_active_gw();
 
 	cmd->ac_RC = 0;
 
 	if((cmd->ac_ArgList[0]) && (cmd->ac_ArgList[1]))
 		gw = ami_find_tab(*(ULONG *)cmd->ac_ArgList[0], *(ULONG *)cmd->ac_ArgList[1]);
 
-	if(gw) ami_gui_history(gw->shared, false);
+	if(gw) ami_gui_history(ami_gui_get_gui_window_2(gw), false);
 
 }
 
 RXHOOKF(rx_home)
 {
-	struct gui_window *gw = cur_gw;
+	struct gui_window *gw = ami_gui_get_active_gw();
 	nsurl *url;
 
 	cmd->ac_RC = 0;
@@ -551,7 +554,7 @@ RXHOOKF(rx_home)
 	if (nsurl_create(nsoption_charp(homepage_url), &url) != NSERROR_OK) {
 		amiga_warn_user("NoMemory", 0);
 	} else {
-		browser_window_navigate(gw->bw,
+		browser_window_navigate(ami_gui_get_browser_window(gw),
 					url,
 					NULL,
 					BW_NAVIGATE_HISTORY,
@@ -564,7 +567,7 @@ RXHOOKF(rx_home)
 
 RXHOOKF(rx_reload)
 {
-	struct gui_window *gw = cur_gw;
+	struct gui_window *gw = ami_gui_get_active_gw();
 
 	cmd->ac_RC = 0;
 
@@ -575,11 +578,11 @@ RXHOOKF(rx_reload)
 	{
 		if(cmd->ac_ArgList[0]) /* FORCE */
 		{
-			browser_window_reload(gw->bw, true);
+			browser_window_reload(ami_gui_get_browser_window(gw), true);
 		}
 		else
 		{
-			browser_window_reload(gw->bw, false);
+			browser_window_reload(ami_gui_get_browser_window(gw), false);
 		}
 	}
 }
@@ -602,9 +605,10 @@ RXHOOKF(rx_windows)
 RXHOOKF(rx_active)
 {
 	int window = 0, tab = 0;
-	struct gui_window *gw = cur_gw;
+	struct gui_window *gw = ami_gui_get_active_gw();
 	struct nsObject *node, *nnode;
 	struct gui_window_2 *gwin = NULL;
+	struct MinList *window_list = ami_gui_get_window_list();
 
 	cmd->ac_RC = 0;
 
@@ -623,7 +627,7 @@ RXHOOKF(rx_active)
 			if(node->Type == AMINS_WINDOW)
 			{
 				windows++;
-				if(gwin->gw == gw)
+				if(IS_CURRENT_GW(gwin,gw))
 				{
 					window = windows;
 					break;
@@ -634,7 +638,7 @@ RXHOOKF(rx_active)
 
 	if(cmd->ac_ArgList[0])
 	{
-		tab = ami_find_tab_bw(gwin, gw->bw);
+		tab = ami_find_tab_bw(gwin, ami_gui_get_browser_window(gw));
 	}
 
 	if(cmd->ac_ArgList[0]) sprintf(result, "%d", tab);
@@ -644,7 +648,7 @@ RXHOOKF(rx_active)
 
 RXHOOKF(rx_close)
 {
-	struct gui_window *gw = cur_gw;
+	struct gui_window *gw = ami_gui_get_active_gw();
 
 	cmd->ac_RC = 0;
 
@@ -652,11 +656,11 @@ RXHOOKF(rx_close)
 		gw = ami_find_tab(*(ULONG *)cmd->ac_ArgList[0], *(ULONG *)cmd->ac_ArgList[1]);
 	else if(cmd->ac_ArgList[0])
 	{
-		ami_gui_close_window(gw->shared);
+		ami_gui_close_window(ami_gui_get_gui_window_2(gw));
 		return;
 	}
 
-	if(gw) browser_window_destroy(gw->bw);
+	if(gw) browser_window_destroy(ami_gui_get_browser_window(gw));
 }
 
 RXHOOKF(rx_hotlist)

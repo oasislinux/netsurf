@@ -86,14 +86,14 @@ void ami_clipboard_free(void)
 void gui_start_selection(struct gui_window *g)
 {
 	if(!g) return;
-	if(!g->shared->win) return;
+	if(!ami_gui_get_window(g)) return;
 	if(nsoption_bool(kiosk_mode) == true) return;
 
-	ami_gui_menu_set_disabled(g->shared->win, g->shared->imenu, M_COPY, false);
-	ami_gui_menu_set_disabled(g->shared->win, g->shared->imenu, M_CLEAR, false);
+	ami_gui_menu_set_disabled(ami_gui_get_window(g), ami_gui_get_menu(g), M_COPY, false);
+	ami_gui_menu_set_disabled(ami_gui_get_window(g), ami_gui_get_menu(g), M_CLEAR, false);
 
-	if (browser_window_get_editor_flags(g->bw) & BW_EDITOR_CAN_CUT)
-		ami_gui_menu_set_disabled(g->shared->win, g->shared->imenu, M_CUT, false);
+	if (browser_window_get_editor_flags(ami_gui_get_browser_window(g)) & BW_EDITOR_CAN_CUT)
+		ami_gui_menu_set_disabled(ami_gui_get_window(g), ami_gui_get_menu(g), M_CUT, false);
 }
 
 static char *ami_clipboard_cat_collection(struct CollectionItem *ci, LONG codeset, size_t *text_length)
@@ -276,54 +276,54 @@ void ami_drag_selection(struct gui_window *g)
 	
 	if(!gwin)
 	{
-		DisplayBeep(scrn);
+		ami_gui_beep();
 		return;
 	}
 
-	x = gwin->win->MouseX;
-	y = gwin->win->MouseY;
+	x = ami_gui2_get_window(gwin)->MouseX;
+	y = ami_gui2_get_window(gwin)->MouseY;
 
 	if(ami_text_box_at_point(gwin, (ULONG *)&x, (ULONG *)&y))
 	{
 		iffh = ami_clipboard_init_internal(1);
 
-		browser_window_key_press(g->bw, NS_KEY_COPY_SELECTION);
-		browser_window_mouse_click(gwin->gw->bw, BROWSER_MOUSE_PRESS_1, x, y);
-		browser_window_key_press(gwin->gw->bw, NS_KEY_PASTE);
+		browser_window_key_press(ami_gui_get_browser_window(g), NS_KEY_COPY_SELECTION);
+		browser_window_mouse_click(ami_gui2_get_browser_window(gwin), BROWSER_MOUSE_PRESS_1, x, y);
+		browser_window_key_press(ami_gui2_get_browser_window(gwin), NS_KEY_PASTE);
 
 		ami_clipboard_free_internal(iffh);
 		iffh = old_iffh;
 	}
 	else
 	{
-		x = gwin->win->MouseX;
-		y = gwin->win->MouseY;
+		x = ami_gui2_get_window(gwin)->MouseX;
+		y = ami_gui2_get_window(gwin)->MouseY;
 
-		if(ami_gadget_hit(gwin->objects[GID_URL], x, y))
+		if(ami_gadget_hit(ami_gui2_get_object(gwin, AMI_GAD_URL), x, y))
 		{
-			if((sel = browser_window_get_selection(g->bw)))
+			if((sel = browser_window_get_selection(ami_gui_get_browser_window(g))))
 			{
 				utf8text = ami_utf8_easy(sel);
-				RefreshSetGadgetAttrs((struct Gadget *)gwin->objects[GID_URL],
-					gwin->win, NULL, STRINGA_TextVal, utf8text, TAG_DONE);
+				RefreshSetGadgetAttrs((struct Gadget *)ami_gui2_get_object(gwin, AMI_GAD_URL),
+					ami_gui2_get_window(gwin), NULL, STRINGA_TextVal, utf8text, TAG_DONE);
 				free(sel);
 				ami_utf8_free(utf8text);
 			}
 		}
-		else if(ami_gadget_hit(gwin->objects[GID_SEARCHSTRING], x, y))
+		else if(ami_gadget_hit(ami_gui2_get_object(gwin, AMI_GAD_SEARCH), x, y))
 		{
-			if((sel = browser_window_get_selection(g->bw)))
+			if((sel = browser_window_get_selection(ami_gui_get_browser_window(g))))
 			{
 				utf8text = ami_utf8_easy(sel);
-				RefreshSetGadgetAttrs((struct Gadget *)gwin->objects[GID_SEARCHSTRING],
-					gwin->win, NULL, STRINGA_TextVal, utf8text, TAG_DONE);
+				RefreshSetGadgetAttrs((struct Gadget *)ami_gui2_get_object(gwin, AMI_GAD_SEARCH),
+					ami_gui2_get_window(gwin), NULL, STRINGA_TextVal, utf8text, TAG_DONE);
 				free(sel);
 				ami_utf8_free(utf8text);
 			}
 		}
 		else
 		{
-			DisplayBeep(scrn);
+			ami_gui_beep();
 		}
 	}
 }
@@ -349,15 +349,22 @@ bool ami_easy_clipboard_bitmap(struct bitmap *bitmap)
 #ifdef WITH_NS_SVG
 bool ami_easy_clipboard_svg(struct hlcache_handle *c)
 {
-	const char *source_data;
-	ULONG source_size;
+	const uint8_t *source_data;
+	size_t source_size;
 
-	if(ami_mime_compare(c, "svg") == false) return false;
-	if((source_data = content_get_source_data(c, &source_size)) == NULL) return false;
+	if (ami_mime_compare(c, "svg") == false) {
+		return false;
+	}
+	source_data = content_get_source_data(c, &source_size);
+	if (source_data == NULL) {
+		return false;
+	}
 
-	if(!(OpenIFF(iffh,IFFF_WRITE)))
-	{
-		ami_svg_to_dr2d(iffh, source_data, source_size, nsurl_access(hlcache_handle_get_url(c)));
+	if (!(OpenIFF(iffh,IFFF_WRITE))) {
+		ami_svg_to_dr2d(iffh,
+				(const char *)source_data,
+				source_size,
+				nsurl_access(hlcache_handle_get_url(c)));
 		CloseIFF(iffh);
 	}
 

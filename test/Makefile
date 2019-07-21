@@ -18,7 +18,7 @@ TESTS := \
 NSURL_SOURCES := utils/nsurl/nsurl.c utils/nsurl/parse.c utils/idna.c \
 	utils/punycode.c
 
-# nsurl sources
+# nsurl test sources
 nsurl_SRCS := $(NSURL_SOURCES) utils/corestrings.c test/log.c test/nsurl.c
 
 # url database test sources
@@ -30,7 +30,7 @@ urldbtest_SRCS := $(NSURL_SOURCES) \
 	content/urldb.c \
 	test/log.c test/urldbtest.c
 
-# low level cache sources
+# low level cache test sources
 llcache_SRCS := content/fetch.c content/fetchers/curl.c \
 	content/fetchers/about.c content/fetchers/data.c \
 	content/fetchers/resource.c content/llcache.c \
@@ -127,20 +127,22 @@ endef
 
 $(eval $(call pkg_cfg_detect_lib,check,Check))
 
-COMMON_WARNFLAGS = -W -Wall -Wundef -Wpointer-arith -Wcast-align \
+TEST_WARNFLAGS = -W -Wall -Wundef -Wpointer-arith -Wcast-align \
 	-Wwrite-strings -Wmissing-declarations -Wuninitialized
 
 ifneq ($(CC_MAJOR),2)
-  COMMON_WARNFLAGS += -Wno-unused-parameter
+  TEST_WARNFLAGS += -Wno-unused-parameter
 endif
 
 BASE_TESTCFLAGS := -std=c99 -g \
-	$(COMMON_WARNFLAGS) \
+	$(TEST_WARNFLAGS) \
 	-D_DEFAULT_SOURCE \
 	-D_POSIX_C_SOURCE=200809L \
 	-D_XOPEN_SOURCE=600 \
 	-Itest -Iinclude -Icontent/handlers -Ifrontends -I. -I.. \
 	-Dnsgtk \
+	-DNETSURF_BUILTIN_LOG_FILTER=\"level:WARNING\" \
+	-DNETSURF_BUILTIN_VERBOSE_FILTER=\"level:DEBUG\" \
 	$(SAN_FLAGS) \
 	$(shell pkg-config --cflags libcurl libparserutils libwapcaplet libdom libnsutils libutf8proc) \
 	$(LIB_CFLAGS)
@@ -156,7 +158,7 @@ TESTLDFLAGS := -L$(TESTROOT) \
 
 # malloc faliure injection generator
 $(TESTROOT)/libmalloc_fig.so:test/malloc_fig.c
-	$(CC) -shared -fPIC -I. -std=c99 $(COMMON_WARNFLAGS) $^ -o $@
+	$(CC) -shared -fPIC -I. -std=c99 $(TEST_WARNFLAGS) $^ -o $@
 
 # Source files for all tests being compiled
 TESTSOURCES :=

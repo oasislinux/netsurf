@@ -230,7 +230,7 @@ nsws_window_toolbar_command(struct gui_window *gw,
 			    int identifier,
 			    HWND ctrl_window)
 {
-	NSLOG(netsurf, INFO,
+	NSLOG(netsurf, DEBUG,
 	      "notification_code %d identifier %d ctrl_window %p",
 	      notification_code,
 	      identifier,
@@ -241,39 +241,39 @@ nsws_window_toolbar_command(struct gui_window *gw,
 	case IDC_MAIN_URLBAR:
 		switch (notification_code) {
 		case EN_CHANGE:
-			NSLOG(netsurf, INFO, "EN_CHANGE");
+			NSLOG(netsurf, DEBUG, "EN_CHANGE");
 			break;
 
 		case EN_ERRSPACE:
-			NSLOG(netsurf, INFO, "EN_ERRSPACE");
+			NSLOG(netsurf, DEBUG, "EN_ERRSPACE");
 			break;
 
 		case EN_HSCROLL:
-			NSLOG(netsurf, INFO, "EN_HSCROLL");
+			NSLOG(netsurf, DEBUG, "EN_HSCROLL");
 			break;
 
 		case EN_KILLFOCUS:
-			NSLOG(netsurf, INFO, "EN_KILLFOCUS");
+			NSLOG(netsurf, DEBUG, "EN_KILLFOCUS");
 			break;
 
 		case EN_MAXTEXT:
-			NSLOG(netsurf, INFO, "EN_MAXTEXT");
+			NSLOG(netsurf, DEBUG, "EN_MAXTEXT");
 			break;
 
 		case EN_SETFOCUS:
-			NSLOG(netsurf, INFO, "EN_SETFOCUS");
+			NSLOG(netsurf, DEBUG, "EN_SETFOCUS");
 			break;
 
 		case EN_UPDATE:
-			NSLOG(netsurf, INFO, "EN_UPDATE");
+			NSLOG(netsurf, DEBUG, "EN_UPDATE");
 			break;
 
 		case EN_VSCROLL:
-			NSLOG(netsurf, INFO, "EN_VSCROLL");
+			NSLOG(netsurf, DEBUG, "EN_VSCROLL");
 			break;
 
 		default:
-			NSLOG(netsurf, INFO, "Unknown notification_code");
+			NSLOG(netsurf, DEBUG, "Unknown notification_code");
 			break;
 		}
 		break;
@@ -1056,48 +1056,35 @@ nsws_window_command(HWND hwnd,
 		break;
 
 	case IDM_EDIT_CUT:
-		OpenClipboard(gw->main);
-		EmptyClipboard();
-		CloseClipboard();
 		if (GetFocus() == gw->urlbar) {
 			SendMessage(gw->urlbar, WM_CUT, 0, 0);
-		} else if (gw->bw != NULL) {
-			browser_window_key_press(gw->bw, NS_KEY_CUT_SELECTION);
+		} else {
+			SendMessage(gw->drawingarea, WM_CUT, 0, 0);
 		}
 		break;
 
 	case IDM_EDIT_COPY:
-		OpenClipboard(gw->main);
-		EmptyClipboard();
-		CloseClipboard();
 		if (GetFocus() == gw->urlbar) {
 			SendMessage(gw->urlbar, WM_COPY, 0, 0);
-		} else if (gw->bw != NULL) {
-			browser_window_key_press(gw->bw, NS_KEY_COPY_SELECTION);
+		} else {
+			SendMessage(gw->drawingarea, WM_COPY, 0, 0);
 		}
 		break;
 
 	case IDM_EDIT_PASTE: {
-		OpenClipboard(gw->main);
-		HANDLE h = GetClipboardData(CF_TEXT);
-		if (h != NULL) {
-			char *content = GlobalLock(h);
-			NSLOG(netsurf, INFO, "pasting %s\n", content);
-			GlobalUnlock(h);
-		}
-		CloseClipboard();
-		if (GetFocus() == gw->urlbar)
+		if (GetFocus() == gw->urlbar) {
 			SendMessage(gw->urlbar, WM_PASTE, 0, 0);
-		else
-			browser_window_key_press(gw->bw, NS_KEY_PASTE);
+		} else {
+			SendMessage(gw->drawingarea, WM_PASTE, 0, 0);
+		}
 		break;
 	}
 
 	case IDM_EDIT_DELETE:
 		if (GetFocus() == gw->urlbar)
-			SendMessage(gw->urlbar, WM_CUT, 0, 0);
+			SendMessage(gw->urlbar, WM_CLEAR, 0, 0);
 		else
-			browser_window_key_press(gw->bw, NS_KEY_DELETE_RIGHT);
+			SendMessage(gw->drawingarea, WM_CLEAR, 0, 0);
 		break;
 
 	case IDM_EDIT_SELECT_ALL:

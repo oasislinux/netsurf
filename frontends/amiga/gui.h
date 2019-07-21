@@ -1,5 +1,5 @@
 /*
- * Copyright 2008-2017 Chris Young <chris@unsatisfactorysoftware.co.uk>
+ * Copyright 2008-2019 Chris Young <chris@unsatisfactorysoftware.co.uk>
  *
  * This file is part of NetSurf, http://www.netsurf-browser.org/
  *
@@ -38,57 +38,21 @@
 #define HOOKF(ret,func,type,ptr,msgtype) static ASM ret func(REG(a0, struct Hook *hook),REG(a2, type ptr), REG(a1, msgtype msg))
 #endif
 
-enum
-{
-    OID_MAIN = 0,
-	OID_VSCROLL,
-	OID_HSCROLL,
-	OID_LAST, /* for compatibility */
-	GID_MAIN,
-	GID_TABLAYOUT,
-	GID_BROWSER,
-	GID_STATUS,
-	GID_URL,
-	GID_ICON,
-	GID_STOP,
-	GID_RELOAD,
-	GID_HOME,
-	GID_BACK,
-	GID_FORWARD,
-	GID_THROBBER,
-	GID_SEARCH_ICON,
-	GID_FAVE,
-	GID_FAVE_ADD,
-	GID_FAVE_RMV,
-	GID_CLOSETAB,
-	GID_CLOSETAB_BM,
-	GID_ADDTAB,
-	GID_ADDTAB_BM,
-	GID_TABS,
-	GID_TABS_FLAG,
-	GID_USER,
-	GID_PASS,
-	GID_LOGIN,
-	GID_CANCEL,
-	GID_NEXT,
-	GID_PREV,
-	GID_SEARCHSTRING,
-	GID_SHOWALL,
-	GID_CASE,
-	GID_TOOLBARLAYOUT,
-	GID_HOTLIST,
-	GID_HOTLISTLAYOUT,
-	GID_HOTLISTSEPBAR,
-	GID_HSCROLL,
-	GID_HSCROLLLAYOUT,
-	GID_VSCROLL,
-	GID_VSCROLLLAYOUT,
-	GID_LAST
+/* valid options for ami_gui_get_object */
+enum {
+	AMI_GAD_THROBBER = 0,
+	AMI_GAD_TABS,
+	AMI_GAD_URL,
+	AMI_GAD_SEARCH,
+	AMI_WIN_MAIN
 };
 
 struct find_window;
 struct ami_history_local_window;
 struct ami_menu_data;
+struct gui_window;
+struct gui_window_2;
+struct IBox;
 
 #define AMI_GUI_TOOLBAR_MAX 20
 
@@ -111,83 +75,7 @@ struct ami_generic_window {
 	const struct ami_win_event_table *tbl;
 };
 
-struct gui_window_2 {
-	struct ami_generic_window w;
-	struct Window *win;
-	Object *restrict objects[GID_LAST];
-	struct gui_window *gw; /* currently-displayed gui_window */
-	bool redraw_required;
-	int throbber_frame;
-	struct List tab_list;
-	ULONG tabs;
-	ULONG next_tab;
-	struct Node *last_new_tab;
-	struct Hook scrollerhook;
-	struct form_control *control;
-	browser_mouse_state mouse_state;
-	browser_mouse_state key_state;
-	ULONG throbber_update_count;
-	struct find_window *searchwin;
-	ULONG oldh;
-	ULONG oldv;
-	int temp;
-	bool redraw_scroll;
-	bool new_content;
-	struct ami_menu_data *menu_data[AMI_MENU_AREXX_MAX + 1]; /* only for GadTools menus */
-	ULONG hotlist_items;
-	Object *restrict hotlist_toolbar_lab[AMI_GUI_TOOLBAR_MAX];
-	struct List hotlist_toolbar_list;
-	struct List *web_search_list;
-	Object *search_bm;
-	char *restrict svbuffer;
-	char *restrict status;
-	char *restrict wintitle;
-	char *restrict helphints[GID_LAST];
-	browser_mouse_state prev_mouse_state;
-	struct timeval lastclick;
-	struct AppIcon *appicon; /* iconify appicon */
-	struct DiskObject *dobj; /* iconify appicon */
-	struct Hook favicon_hook;
-	struct Hook throbber_hook;
-	struct Hook *ctxmenu_hook;
-	Object *restrict history_ctxmenu[2];
-	Object *restrict clicktab_ctxmenu;
-	gui_drag_type drag_op;
-	struct IBox *ptr_lock;
-	struct AppWindow *appwin;
-	struct MinList *shared_pens;
-	gui_pointer_shape mouse_pointer;
-	struct Menu *imenu; /* Intuition menu */
-	bool closed; /* Window has been closed (via menu) */
-};
-
-struct gui_window
-{
-	struct gui_window_2 *shared;
-	int tab;
-	struct Node *tab_node;
-	int c_x; /* Caret X posn */
-	int c_y; /* Caret Y posn */
-	int c_w; /* Caret width */
-	int c_h; /* Caret height */
-	int c_h_temp;
-	int scrollx;
-	int scrolly;
-	struct ami_history_local_window *hw;
-	struct List dllist;
-	struct hlcache_handle *favicon;
-	bool throbbing;
-	char *tabtitle;
-	APTR deferred_rects_pool;
-	struct MinList *deferred_rects;
-	struct browser_window *bw;
-	float scale;
-};
-
-extern struct MinList *window_list; /**\todo stop arexx.c poking about in here */
-extern struct Screen *scrn;
-extern struct MsgPort *sport;
-extern struct gui_window *cur_gw;
+#define IS_CURRENT_GW(GWIN,GW) (ami_gui2_get_gui_window(GWIN) == GW)
 
 /* The return value for these functions must be deallocated using FreeVec() */
 STRPTR ami_locale_langs(int *codeset);
@@ -211,7 +99,14 @@ void ami_gui_update_hotlist_button(struct gui_window_2 *gwin);
 nserror ami_gui_new_blank_tab(struct gui_window_2 *gwin);
 int ami_gui_count_windows(int window, int *tabs);
 void ami_gui_set_scale(struct gui_window *gw, float scale);
+void ami_set_pointer(struct gui_window_2 *gwin, gui_pointer_shape shape, bool update);
+void ami_reset_pointer(struct gui_window_2 *gwin);
+void *ami_window_at_pointer(int type);
 
+/**
+ * Beep
+ */
+void ami_gui_beep(void);
 
 /**
  * Close a window and all tabs attached to it.
@@ -244,11 +139,25 @@ nserror ami_gui_get_space_box(Object *obj, struct IBox **bbox);
 void ami_gui_free_space_box(struct IBox *bbox);
 
 /**
+ * Get shared message port
+ *
+ * @return Pointer to an initialised MsgPort
+ */
+struct MsgPort *ami_gui_get_shared_msgport(void);
+
+/**
  * Get the application.library ID NetSurf is registered as.
  *
  * @return App ID.
  */
 uint32 ami_gui_get_app_id(void);
+
+/**
+ * Get a pointer to the screen NetSurf is running on.
+ *
+ * @return Pointer to struct Screen.
+ */
+struct Screen *ami_gui_get_screen(void);
 
 /**
  * Get the string for NetSurf's screen titlebar.
@@ -273,6 +182,15 @@ nserror ami_gui_win_list_add(void *win, int type, const struct ami_win_event_tab
 void ami_gui_win_list_remove(void *win);
 
 /**
+ * Get the window list.
+ *
+ *\TODO: Nothing should be poking around in this list, but we aren't
+ *       assigning unique IDs to windows (ARexx interface needs this)
+ *       ami_find_gwin_by_id() is close but not ARexx-friendly
+ */
+struct MinList *ami_gui_get_window_list(void);
+
+/**
  * Get which qualifier keys are being pressed
  */
 int ami_gui_get_quals(Object *win_obj);
@@ -282,6 +200,168 @@ int ami_gui_get_quals(Object *win_obj);
  */
 bool ami_gui_window_update_box_deferred_check(struct MinList *deferred_rects,
 				const struct rect *restrict new_rect, APTR mempool);
+
+/**
+ * Adjust scale by specified amount
+ */
+void ami_gui_adjust_scale(struct gui_window *gw, float adjustment);
+
+/**
+ * Get a pointer to the gui_window which NetSurf considers
+ * to be the current/active one
+ */
+struct gui_window *ami_gui_get_active_gw(void);
+
+/**
+ * Get browser window from gui_window
+ */
+struct browser_window *ami_gui_get_browser_window(struct gui_window *gw);
+
+/**
+ * Get browser window from gui_window_2
+ */
+struct browser_window *ami_gui2_get_browser_window(struct gui_window_2 *gwin);
+
+/**
+ * Get gui_window_2 from gui_window
+ */
+struct gui_window_2 *ami_gui_get_gui_window_2(struct gui_window *gw);
+
+/**
+ * Get gui_window from gui_window_2
+ */
+struct gui_window *ami_gui2_get_gui_window(struct gui_window_2 *gwin);
+
+/**
+ * Get download list from gui_window
+ */
+struct List *ami_gui_get_download_list(struct gui_window *gw);
+
+/**
+ * Get tab title from gui_window
+ */
+const char *ami_gui_get_tab_title(struct gui_window *gw);
+
+/**
+ * Get window title from gui_window
+ */
+const char *ami_gui_get_win_title(struct gui_window *gw);
+
+/**
+ * Get tab node from gui_window
+ */
+struct Node *ami_gui_get_tab_node(struct gui_window *gw);
+
+/**
+ * Get tabs from gui_window_2
+ */
+ULONG ami_gui2_get_tabs(struct gui_window_2 *gwin);
+
+/**
+ * Get tab list from gui_window_2
+ */
+struct List *ami_gui2_get_tab_list(struct gui_window_2 *gwin);
+
+/**
+ * Get favicon from gui_window
+ */
+struct hlcache_handle *ami_gui_get_favicon(struct gui_window *gw);
+
+/**
+ * Get local history window from gui_window
+ */
+struct ami_history_local_window *ami_gui_get_history_window(struct gui_window *gw);
+
+/**
+ * Set local history window in gui_window
+ */
+void ami_gui_set_history_window(struct gui_window *gw, struct ami_history_local_window *hw);
+
+/**
+ * Set search window in gui_window
+ */
+void ami_gui_set_find_window(struct gui_window *gw, struct find_window *fw);
+
+/**
+ * Get throbbing status from gui_window
+ */
+bool ami_gui_get_throbbing(struct gui_window *gw);
+
+/**
+ * Get throbbing frame from gui_window
+ */
+int ami_gui_get_throbber_frame(struct gui_window *gw);
+
+/**
+ * Set throbbing frame in gui_window
+ */
+void ami_gui_set_throbber_frame(struct gui_window *gw, int frame);
+
+/**
+ * Set throbbing status in gui_window
+ */
+void ami_gui_set_throbbing(struct gui_window *gw, bool throbbing);
+
+/**
+ * Get object from gui_window
+ */
+Object *ami_gui2_get_object(struct gui_window_2 *gwin, int object_type);
+
+/**
+ * Get window from gui_window
+ */
+struct Window *ami_gui_get_window(struct gui_window *gw);
+
+/**
+ * Get window from gui_window_2
+ */
+struct Window *ami_gui2_get_window(struct gui_window_2 *gwin);
+
+/**
+ * Get imenu from gui_window
+ */
+struct Menu *ami_gui_get_menu(struct gui_window *gw);
+
+/**
+ * Set imenu to gui_window_2. A value of NULL will free the menu (and menu_data!)
+ */
+void ami_gui2_set_menu(struct gui_window_2 *gwin, struct Menu *menu);
+
+/**
+ * Get menu_data from gui_window_2
+ */
+struct ami_menu_data **ami_gui2_get_menu_data(struct gui_window_2 *gwin);
+
+/**
+ * Set ctxmenu history tmp in gui_window_2
+ */
+void ami_gui2_set_ctxmenu_history_tmp(struct gui_window_2 *gwin, int temp);
+
+/**
+ * Get ctxmenu history tmp from gui_window_2
+ */
+int ami_gui2_get_ctxmenu_history_tmp(struct gui_window_2 *gwin);
+
+/**
+ * Get ctxmenu history from gui_window_2
+ */
+Object *ami_gui2_get_ctxmenu_history(struct gui_window_2 *gwin, ULONG direction);
+
+/**
+ * Set ctxmenu history in gui_window_2
+ */
+void ami_gui2_set_ctxmenu_history(struct gui_window_2 *gwin, ULONG direction, Object *ctx_hist);
+
+/**
+ * Set closed in gui_window_2
+ */
+void ami_gui2_set_closed(struct gui_window_2 *gwin, bool closed);
+
+/**
+ * Set new_content in gui_window_2
+ * Indicates the window needs redrawing
+ */
+void ami_gui2_set_new_content(struct gui_window_2 *gwin, bool new_content);
 
 #endif
 

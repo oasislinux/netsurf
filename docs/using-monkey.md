@@ -5,6 +5,13 @@ This document provides usage instructions for the Monkey version of NetSurf.
 
 Monkey NetSurf has been tested on Ubuntu and Debian.
 
+Automated testing
+-----------------
+
+If you want to run the monkey_driver.py or monkey-see-monkey-do tools then
+you will need python3 and pyyaml installed.  The latter also needs internet
+access to test.netsurf-browser.org to acquire test data.
+
 Overview
 --------
 
@@ -49,7 +56,7 @@ browser windows are prefixed by `WINDOW`.
 
 * `WINDOW`: Anything about browser windows in general
 
-* `DOWNLOAD_WINDOW`: Anything about the download window.
+* `DOWNLOAD`: Anything about the download window.
 
 * `SSLCERT`: Anything about SSL certificates
 
@@ -105,6 +112,11 @@ Commands
     Cause the given browser window to visit the given URL.
     Optionally you can give a referrer URL to also use (simulating
     a click in the browser on a link).
+    Minimally you can expect throbber stop response.
+
+*   `WINDOW STOP` _%id%_
+
+    Cause a browser window to stop any in progress navigatoipn.
     Minimally you can expect throbber, url etc responses.
 
 *   `WINDOW REDRAW` _%id%_ [_%num% %num% %num% %num%_]
@@ -118,10 +130,54 @@ Commands
     Minimally you can expect redraw start/stop messages and you
     can likely expect some number of `PLOT` results.
 
-*   `WINDOW RELOAD` _%id%_
+*   `WINDOW RELOAD` _%id%_ [all]
 
     Cause a browser window to reload its current content.
     Expect responses similar to a GO command.
+
+*   `WINDOW EXEC WIN` _%id%_ _%str%_
+
+    Cause a browser window to execute some javascript.  It won't
+    work if the window doesn't have a *finished* HTML content.
+
+	This will send a `JS` message back.
+
+### Login commands
+
+*   `LOGIN USERNAME` _%id%_ _%str%_
+
+    Set the username for the login
+
+*   `LOGIN PASSWORD` _%id%_ _%str%_
+
+    Set the password for the login
+
+*   `LOGIN GO` _%id%_
+
+    Cause a login to proceed using the set credentials
+
+    This will send a `DESTROY` message back.
+
+*   `LOGIN DESTROY` _%id%_
+
+    Cause a login to fail
+
+    This will send a `DESTROY` message back.
+
+
+### SSL certificate commands
+
+*   `SSLCERT GO` _%id%_
+
+    Cause a ssl certificate to be accepted and fetch to proceed.
+
+    This will send a `DESTROY` message back.
+
+*   `SSLCERT DESTROY` _%id%_
+
+    Cause a ssl certificate to be rejected and fetch to fail
+
+    This will send a `DESTROY` message back.
 
 
 Responses
@@ -302,44 +358,82 @@ Responses
     The core wraps redraws in these messages.  Thus `PLOT` responses can
     be allocated to the appropriate window.
 
+*   `WINDOW JS WIN` _%id%_ `RET` `TRUE`/`FALSE`
+
+    Here `FALSE` indicates that some issue prevented the injection of
+    the script.
+
+*   `WINDOW CONSOLE_LOG WIN` _%id%_ `SOURCE` _%source%_ _%foldable%_ _%level%_ _%str%_
+
+    Here, _%source%_ will be one of: `client-input`, `scripting-error`, or
+    `scripting-console`.  _%foldable%_ will be one of `FOLDABLE` or
+    `NOT-FOLDABLE`.  _%level%_ will be one of `LOG`, `INFO`, `WARN`, or
+    `ERROR`.  The terminal string will be the log message.
+
 ### Download window messages
 
-*   `DOWNLOAD_WINDOW CREATE DWIN` _%id%_ `WIN` _%id%_
+*   `DOWNLOAD CREATE DWIN` _%id%_ `WIN` _%id%_
 
     The core asked Monkey to create a download window owned by the
     given browser window.
 
-*   `DOWNLOAD_WINDOW DATA DWIN` _%id%_ `SIZE` _%n%_ `DATA` _%str%_
+*   `DOWNLOAD DATA DWIN` _%id%_ `SIZE` _%n%_ `DATA` _%str%_
 
     The core asked Monkey to update the named download window with
     the given byte size and data string.
 
-*   `DOWNLOAD_WINDOW ERROR DWIN` _%id%_ `ERROR` _%str%_
+*   `DOWNLOAD ERROR DWIN` _%id%_ `ERROR` _%str%_
 
     The core asked Monkey to update the named download window with
     the given error message.
 
-*   `DOWNLOAD_WINDOW DONE DWIN` _%id%_
+*   `DOWNLOAD DONE DWIN` _%id%_
 
     The core asked Monkey to destroy the named download window.
 
 ### SSL Certificate messages
 
-*   `SSLCERT VERIFY CERT` _%id%_ `URL` _%url%_
+*   `SSLCERT VERIFY CWIN` _%id%_ `URL` _%url%_
 
     The core asked Monkey to say whether or not a given SSL
     certificate is OK.
 
-> TODO: Implement the rest of the SSL certificat verification behaviour
+*   `LOGIN DESTROY CWIN` _%id%_
+
+    The given certificate window has been destroyed and should no longer be sent
+    commands otherwise undefined behaviour may ensue.
 
 ### 401 Login messages
 
-*   `401LOGIN OPEN M4` _%id%_ `URL` _%url%_ `REALM` _%str%_
+*   `LOGIN OPEN LWIN` _%id%_ `URL` _%url%_
 
-    The core asked Monkey to ask for identification for the named
-    realm at the given URL.
+    The core asked Monkey to ask for identification for the given URL.
 
-> TODO: Implement support to control the 401LOGIN process
+    This will be *immediately* followed by:
+
+*   `LOGIN USER LWIN` _%id%_ `STR` _%str%_
+
+    The given login window has a default username of the given string
+
+    This will be *immediately* followed by:
+
+*   `LOGIN PASS LWIN` _%id%_ `STR` _%str%_
+
+    The given login window has a default password of the given string
+
+    This will be *immediately* followed by:
+
+*   `LOGIN REALM LWIN` _%id%_ `STR` _%str%_
+
+    The given login window has a realm of the given string
+
+    Subsequent to this message, the user of monkey is at liberty to issue
+    `LOGIN` commands to control the response of the `401LOGIN` process.
+
+*   `LOGIN DESTROY LWIN` _%id%_
+
+    The given login window has been destroyed and should no longer be sent
+    commands otherwise undefined behaviour may ensue.
 
 ### Plotter messages
 

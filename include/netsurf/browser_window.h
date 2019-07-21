@@ -30,6 +30,7 @@
 
 #include "utils/errors.h"
 #include "netsurf/mouse.h"
+#include "netsurf/console.h"
 
 struct browser_window;
 struct hlcache_handle;
@@ -724,5 +725,36 @@ nserror browser_window_get_name(struct browser_window *bw, const char **name);
  *         original name is untouched.
  */
 nserror browser_window_set_name(struct browser_window *bw, const char *name);
+
+/**
+ * Execute some JavaScript code in a browsing context.
+ *
+ * Runs the passed in JavaScript code in the browsing context.
+ *
+ * \param bw The browser window
+ * \param src The JavaScript source code
+ * \param srclen The length of the source code
+ * \return Whether the JS function was successfully injected into the content
+ */
+bool browser_window_exec(struct browser_window *bw, const char *src, size_t srclen);
+
+/**
+ * Log a console message into the browser window console.
+ *
+ * If the targetted browser window is a frame, the message will be bubbled
+ * to the outermost window to be logged.
+ *
+ * \param bw The browser window
+ * \param src The source of the message
+ * \param msg The text of the message
+ * \param msglen The length of the text of the message
+ * \param flags Flags for the message
+ * \return Whether or not the logged message succeeded in being stored
+ */
+nserror browser_window_console_log(struct browser_window *bw,
+				   browser_window_console_source src,
+				   const char *msg,
+				   size_t msglen,
+				   browser_window_console_flags flags);
 
 #endif

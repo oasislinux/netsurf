@@ -109,6 +109,7 @@ struct gui_window;
 struct gui_window_2;
 struct hlcache_handle;
 struct Window;
+struct ami_menu_data;
 
 ULONG ami_gui_menu_number(int item);
 struct Menu *ami_gui_menu_create(struct gui_window_2 *gwin);
@@ -154,5 +155,10 @@ void ami_gui_menu_refresh_hotlist(void);
  * \return true if NetSurf has been quit
  */
 bool ami_gui_menu_quit_selected(void);
+
+/**
+ * Frees a menu.  Only used on OS3 and old OS4.
+ */
+void ami_gui_menu_freemenus(struct Menu *menu, struct ami_menu_data **md);
 #endif
 

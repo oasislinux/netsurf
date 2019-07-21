@@ -326,662 +326,1010 @@ bool form_add_option(struct form_control *control, char *value, char *text,
 	return true;
 }
 
+/** string allocation size for numeric values in multipart data */
+#define FETCH_DATA_INT_VALUE_SIZE 20
 
-/* exported interface documented in html/form_internal.h */
-bool form_successful_controls_dom(struct form *_form,
-				  struct form_control *_submit_button,
-				  struct fetch_multipart_data **successful_controls)
+/**
+ * append split key name and integer value to a multipart data list
+ *
+ * \param name key name
+ * \param ksfx key name suffix
+ * \param value The value to encode
+ * \param fetch_data_next_ptr The multipart data list to append to.
+ */
+static nserror
+fetch_data_list_add_sname(const char *name,
+			  const char *ksfx,
+			  int value,
+			  struct fetch_multipart_data ***fetch_data_next_ptr)
 {
-	dom_html_form_element *form = _form->node;
-	dom_html_element *submit_button = (_submit_button != NULL) ? _submit_button->node : NULL;
-	dom_html_collection *form_elements = NULL;
-	dom_html_options_collection *options = NULL;
-	dom_node *form_element = NULL, *option_element = NULL;
-	dom_exception err;
-	dom_string *nodename = NULL, *inputname = NULL, *inputvalue = NULL, *inputtype = NULL;
-	struct fetch_multipart_data sentinel, *last_success, *success_new;
-	bool had_submit = false, element_disabled, checked;
-	char *charset, *rawfile_temp = NULL, *basename;
-	uint32_t index, element_count;
-	struct image_input_coords *coords;
+	struct fetch_multipart_data *fetch_data;
+	int keysize;
 
-	last_success = &sentinel;
-	sentinel.next = NULL;
+	fetch_data = calloc(1, sizeof(*fetch_data));
+	if (fetch_data == NULL) {
+		NSLOG(netsurf, INFO, "failed allocation for fetch data");
+		return NSERROR_NOMEM;
+	}
+
+	/* key name */
+	keysize = snprintf(fetch_data->name, 0, "%s%s", name, ksfx);
+	fetch_data->name = malloc(keysize + 1); /* allow for null */
+	if (fetch_data->name == NULL) {
+		free(fetch_data);
+		NSLOG(netsurf, INFO,
+		      "keyname allocation failure for %s%s", name, ksfx);
+		return NSERROR_NOMEM;
+	}
+	snprintf(fetch_data->name, keysize + 1, "%s%s", name, ksfx);
+
+	/* value */
+	fetch_data->value = malloc(FETCH_DATA_INT_VALUE_SIZE);
+	if (fetch_data->value == NULL) {
+		free(fetch_data->name);
+		free(fetch_data);
+		NSLOG(netsurf, INFO, "value allocation failure");
+		return NSERROR_NOMEM;
+	}
+	snprintf(fetch_data->value, FETCH_DATA_INT_VALUE_SIZE, "%d", value);
+
+	/* link into list */
+	**fetch_data_next_ptr = fetch_data;
+	*fetch_data_next_ptr = &fetch_data->next;
+
+	return NSERROR_OK;
+}
+
+
+/**
+ * append DOM string name/value pair to a multipart data list
+ *
+ * \param name key name
+ * \param value the value to associate with the key
+ * \param rawfile the raw file value to associate with the key.
+ * \param form_charset The form character set
+ * \param docu_charset The document character set for fallback
+ * \param fetch_data_next_ptr The multipart data list being constructed.
+ * \return NSERROR_OK on success or appropriate error code.
+ */
+static nserror
+fetch_data_list_add(dom_string *name,
+		    dom_string *value,
+		    const char *rawfile,
+		    const char *form_charset,
+		    const char *docu_charset,
+		    struct fetch_multipart_data ***fetch_data_next_ptr)
+{
+	struct fetch_multipart_data *fetch_data;
+
+	assert(name != NULL);
+
+	fetch_data = calloc(1, sizeof(*fetch_data));
+	if (fetch_data == NULL) {
+		NSLOG(netsurf, INFO, "failed allocation for fetch data");
+		return NSERROR_NOMEM;
+	}
+
+	fetch_data->name = form_encode_item(dom_string_data(name),
+					    dom_string_byte_length(name),
+					    form_charset,
+					    docu_charset);
+	if (fetch_data->name == NULL) {
+		NSLOG(netsurf, INFO, "Could not encode name for fetch data");
+		free(fetch_data);
+		return NSERROR_NOMEM;
+	}
+
+	if (value == NULL) {
+		fetch_data->value = strdup("");
+	} else {
+		fetch_data->value = form_encode_item(dom_string_data(value),
+						     dom_string_byte_length(value),
+						     form_charset,
+						     docu_charset);
+	}
+	if (fetch_data->value == NULL) {
+		NSLOG(netsurf, INFO, "Could not encode value for fetch data");
+		free(fetch_data->name);
+		free(fetch_data);
+		return NSERROR_NOMEM;
+	}
+
+	/* deal with raw file name */
+	if (rawfile != NULL) {
+		fetch_data->file = true;
+		fetch_data->rawfile = strdup(rawfile);
+		if (fetch_data->rawfile == NULL) {
+			NSLOG(netsurf, INFO,
+			      "Could not encode rawfile value for fetch data");
+			free(fetch_data->value);
+			free(fetch_data->name);
+			free(fetch_data);
+			return NSERROR_NOMEM;
+		}
+	}
+
+	/* link into list */
+	**fetch_data_next_ptr = fetch_data;
+	*fetch_data_next_ptr = &fetch_data->next;
+
+	return NSERROR_OK;
+}
+
+/**
+ * process form HTMLTextAreaElement into multipart data.
+ *
+ * \param text_area_element The form select DOM element to convert.
+ * \param form_charset The form character set
+ * \param doc_charset The document character set for fallback
+ * \param fetch_data_next_ptr The multipart data list being constructed.
+ * \return NSERROR_OK on success or appropriate error code.
+ */
+static nserror
+form_dom_to_data_textarea(dom_html_text_area_element *text_area_element,
+			  const char *form_charset,
+			  const char *doc_charset,
+			  struct fetch_multipart_data ***fetch_data_next_ptr)
+{
+	dom_exception exp; /* the result from DOM operations */
+	bool element_disabled;
+	dom_string *inputname;
+	dom_string *inputvalue;
+	nserror res;
+
+	/* check if element is disabled */
+	exp = dom_html_text_area_element_get_disabled(text_area_element,
+						      &element_disabled);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO,
+		      "Could not get text area disabled property. exp %d", exp);
+		return NSERROR_DOM;
+	}
+
+	if (element_disabled) {
+		/* allow enumeration to continue after disabled element */
+		return NSERROR_OK;
+	}
+
+	/* obtain name property */
+	exp = dom_html_text_area_element_get_name(text_area_element,
+						  &inputname);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO,
+		      "Could not get text area name property. exp %d", exp);
+		return NSERROR_DOM;
+	}
+
+	if (inputname == NULL) {
+		/* allow enumeration to continue after element with no name */
+		return NSERROR_OK;
+	}
+
+	/* obtain text area value */
+	exp = dom_html_text_area_element_get_value(text_area_element,
+						   &inputvalue);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO,
+		      "Could not get text area content. exp %d", exp);
+		dom_string_unref(inputname);
+		return NSERROR_DOM;
+	}
+
+	/* add key/value pair to fetch data list */
+	res = fetch_data_list_add(inputname,
+				  inputvalue,
+				  NULL,
+				  form_charset,
+				  doc_charset,
+				  fetch_data_next_ptr);
+
+	dom_string_unref(inputvalue);
+	dom_string_unref(inputname);
+
+	return res;
+}
+
+static nserror
+form_dom_to_data_select_option(dom_html_option_element *option_element,
+			      dom_string *keyname,
+			      const char *form_charset,
+			      const char *docu_charset,
+			      struct fetch_multipart_data ***fetch_data_next_ptr)
+{
+	nserror res;
+	dom_exception exp; /* the result from DOM operations */
+	dom_string *value;
+	bool selected;
+
+	exp = dom_html_option_element_get_selected(option_element, &selected);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO, "Could not get option selected property");
+		return NSERROR_DOM;
+	}
+
+	if (!selected) {
+		/* unselected options do not add fetch data entries */
+		return NSERROR_OK;
+	}
+
+	exp = dom_html_option_element_get_value(option_element, &value);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO, "Could not get option value");
+		return NSERROR_DOM;
+	}
+
+	/* add key/value pair to fetch data list */
+	res = fetch_data_list_add(keyname,
+				  value,
+				  NULL,
+				  form_charset,
+				  docu_charset,
+				  fetch_data_next_ptr);
+
+	dom_string_unref(value);
+
+	return res;
+}
+
+/**
+ * process form HTMLSelectElement into multipart data.
+ *
+ * \param select_element The form select DOM element to convert.
+ * \param form_charset The form character set
+ * \param doc_charset The document character set for fallback
+ * \param fetch_data_next_ptr The multipart data list being constructed.
+ * \return NSERROR_OK on success or appropriate error code.
+ */
+static nserror
+form_dom_to_data_select(dom_html_select_element *select_element,
+			const char *form_charset,
+			const char *doc_charset,
+			struct fetch_multipart_data ***fetch_data_next_ptr)
+{
+	nserror res = NSERROR_OK;
+	dom_exception exp; /* the result from DOM operations */
+	bool element_disabled;
+	dom_string *inputname;
+	dom_html_options_collection *options = NULL;
+	uint32_t options_count;
+	uint32_t option_index;
+	dom_node *option_element = NULL;
+
+	/* check if element is disabled */
+	exp = dom_html_select_element_get_disabled(select_element,
+						   &element_disabled);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO,
+		      "Could not get select disabled property. exp %d", exp);
+		return NSERROR_DOM;
+	}
+
+	if (element_disabled) {
+		/* allow enumeration to continue after disabled element */
+		return NSERROR_OK;
+	}
+
+	/* obtain name property */
+	exp = dom_html_select_element_get_name(select_element, &inputname);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO,
+		      "Could not get select name property. exp %d", exp);
+		return NSERROR_DOM;
+	}
+
+	if (inputname == NULL) {
+		/* allow enumeration to continue after element with no name */
+		return NSERROR_OK;
+	}
+
+	/* get options collection */
+	exp = dom_html_select_element_get_options(select_element, &options);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO,
+		      "Could not get select options collection");
+		dom_string_unref(inputname);
+		return NSERROR_DOM;
+	}
+
+	/* get options collection length */
+	exp = dom_html_options_collection_get_length(options, &options_count);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO,
+		      "Could not get select options collection length");
+		dom_html_options_collection_unref(options);
+		dom_string_unref(inputname);
+		return NSERROR_DOM;
+	}
+
+	/* iterate over options collection */
+	for (option_index = 0; option_index < options_count; ++option_index) {
+		exp = dom_html_options_collection_item(options,
+						       option_index,
+						       &option_element);
+		if (exp != DOM_NO_ERR) {
+			NSLOG(netsurf, INFO,
+			      "Could not get options item %d", option_index);
+			res = NSERROR_DOM;
+		} else {
+			res = form_dom_to_data_select_option(
+				(dom_html_option_element *)option_element,
+				inputname,
+				form_charset,
+				doc_charset,
+				fetch_data_next_ptr);
+
+			dom_node_unref(option_element);
+		}
+
+		if (res != NSERROR_OK) {
+			break;
+		}
+	}
+
+	dom_html_options_collection_unref(options);
+	dom_string_unref(inputname);
+
+	return res;
+}
+
+static nserror
+form_dom_to_data_input_submit(dom_html_input_element *input_element,
+			      dom_string *inputname,
+			      const char *charset,
+			      const char *document_charset,
+			      dom_html_element **submit_button,
+			      struct fetch_multipart_data ***fetch_data_next_ptr)
+{
+	dom_exception exp; /* the result from DOM operations */
+	dom_string *inputvalue;
+	nserror res;
+
+	if (*submit_button == NULL) {
+		/* caller specified no button so use this one */
+		*submit_button = (dom_html_element *)input_element;
+	} else if (*submit_button != (dom_html_element *)input_element) {
+		return NSERROR_OK;
+	}
+
+	/* matched button used to submit form */
+	exp = dom_html_input_element_get_value(input_element, &inputvalue);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO, "Could not get submit button value");
+		return NSERROR_DOM;
+	}
+
+	/* add key/value pair to fetch data list */
+	res = fetch_data_list_add(inputname,
+				  inputvalue,
+				  NULL,
+				  charset,
+				  document_charset,
+				  fetch_data_next_ptr);
+
+	dom_string_unref(inputvalue);
+
+	return res;
+}
+
+
+
+static nserror
+form_dom_to_data_input_image(dom_html_input_element *input_element,
+			     dom_string *inputname,
+			     const char *charset,
+			     const char *document_charset,
+			     dom_html_element **submit_button,
+			     struct fetch_multipart_data ***fetch_data_next_ptr)
+{
+	nserror res;
+	dom_exception exp; /* the result from DOM operations */
+	struct image_input_coords *coords;
+	char *basename;
+
+	/* Only use an image input if it was the thing which activated us */
+	if (*submit_button != (dom_html_element *)input_element) {
+		return NSERROR_OK;
+	}
+
+	exp = dom_node_get_user_data((dom_node *)input_element,
+				     corestring_dom___ns_key_image_coords_node_data,
+				     &coords);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO, "Could not get image XY data");
+		return NSERROR_DOM;
+	}
+
+	if (coords == NULL) {
+		NSLOG(netsurf, INFO, "No XY data on the image input");
+		return NSERROR_DOM;
+	}
+
+	/* encode input name once */
+	basename = form_encode_item(dom_string_data(inputname),
+				    dom_string_byte_length(inputname),
+				    charset,
+				    document_charset);
+	if (basename == NULL) {
+		NSLOG(netsurf, INFO, "Could not encode basename");
+		return NSERROR_NOMEM;
+	}
+
+	res = fetch_data_list_add_sname(basename, ".x",
+					coords->x,
+					fetch_data_next_ptr);
+
+	if (res == NSERROR_OK) {
+		res = fetch_data_list_add_sname(basename, ".y",
+						coords->y,
+						fetch_data_next_ptr);
+	}
+
+	free(basename);
+
+	return res;
+}
+
+static nserror
+form_dom_to_data_input_checkbox(dom_html_input_element *input_element,
+				dom_string *inputname,
+				const char *charset,
+				const char *document_charset,
+				struct fetch_multipart_data ***fetch_data_next_ptr)
+{
+	nserror res;
+	dom_exception exp; /* the result from DOM operations */
+	bool checked;
+	dom_string *inputvalue;
+
+	exp = dom_html_input_element_get_checked(input_element, &checked);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO,
+		      "Could not get input element checked");
+		return NSERROR_DOM;
+	}
+
+	if (!checked) {
+		/* unchecked items do not generate a data entry */
+		return NSERROR_OK;
+	}
+
+	exp = dom_html_input_element_get_value(input_element, &inputvalue);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO,
+		      "Could not get input element value");
+		return NSERROR_DOM;
+	}
+
+	/* ensure a default value */
+	if (inputvalue == NULL) {
+		inputvalue = dom_string_ref(corestring_dom_on);
+	}
+
+	/* add key/value pair to fetch data list */
+	res = fetch_data_list_add(inputname,
+				  inputvalue,
+				  NULL,
+				  charset,
+				  document_charset,
+				  fetch_data_next_ptr);
+
+	dom_string_unref(inputvalue);
+
+	return res;
+}
+
+static nserror
+form_dom_to_data_input_file(dom_html_input_element *input_element,
+			    dom_string *inputname,
+			    const char *charset,
+			    const char *document_charset,
+			    struct fetch_multipart_data ***fetch_data_next_ptr)
+{
+	nserror res;
+	dom_exception exp; /* the result from DOM operations */
+	dom_string *inputvalue;
+	const char *rawfile = NULL;
+
+	exp = dom_html_input_element_get_value(input_element, &inputvalue);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO, "Could not get file value");
+		return NSERROR_DOM;
+	}
+
+	exp = dom_node_get_user_data((dom_node *)input_element,
+				     corestring_dom___ns_key_file_name_node_data,
+				     &rawfile);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO, "Could not get file rawname");
+		return NSERROR_DOM;
+	}
+
+	if (rawfile == NULL) {
+		rawfile = "";
+	}
+
+	/* add key/value pair to fetch data list */
+	res = fetch_data_list_add(inputname,
+				  inputvalue,
+				  rawfile,
+				  charset,
+				  document_charset,
+				  fetch_data_next_ptr);
+
+	dom_string_unref(inputvalue);
+
+	return res;
+}
+
+static nserror
+form_dom_to_data_input_text(dom_html_input_element *input_element,
+			    dom_string *inputname,
+			    const char *charset,
+			    const char *document_charset,
+			    struct fetch_multipart_data ***fetch_data_next_ptr)
+{
+	nserror res;
+	dom_exception exp; /* the result from DOM operations */
+	dom_string *inputvalue;
+
+	exp = dom_html_input_element_get_value(input_element, &inputvalue);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO, "Could not get input value");
+		return NSERROR_DOM;
+	}
+
+	/* add key/value pair to fetch data list */
+	res = fetch_data_list_add(inputname,
+				  inputvalue,
+				  NULL,
+				  charset,
+				  document_charset,
+				  fetch_data_next_ptr);
+
+	dom_string_unref(inputvalue);
+
+	return res;
+}
+
+/**
+ * process form input element into multipart data.
+ *
+ * \param input_element The form input DOM element to convert.
+ * \param charset The form character set
+ * \param document_charset The document character set for fallback
+ * \param submit_button The DOM element of the button submitting the form
+ * \param had_submit A boolean value indicating if the submit button
+ *                   has already been processed in the form element enumeration.
+ * \param fetch_data_next_ptr The multipart data list being constructed.
+ * \return NSERROR_OK on success or appropriate error code.
+ */
+static nserror
+form_dom_to_data_input(dom_html_input_element *input_element,
+		       const char *charset,
+		       const char *document_charset,
+		       dom_html_element **submit_button,
+		       struct fetch_multipart_data ***fetch_data_next_ptr)
+{
+	dom_exception exp; /* the result from DOM operations */
+	bool element_disabled;
+	dom_string *inputname;
+	dom_string *inputtype;
+	nserror res;
+
+	/* check if element is disabled */
+	exp = dom_html_input_element_get_disabled(input_element,
+						  &element_disabled);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO,
+		      "Could not get input disabled property. exp %d", exp);
+		return NSERROR_DOM;
+	}
+
+	if (element_disabled) {
+		/* disabled element requires no more processing */
+		return NSERROR_OK;
+	}
+
+	/* obtain name property */
+	exp = dom_html_input_element_get_name(input_element, &inputname);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO,
+		      "Could not get input name property. exp %d", exp);
+		return NSERROR_DOM;
+	}
+
+	if (inputname == NULL) {
+		/* element with no name is not converted */
+		return NSERROR_OK;
+	}
+
+	/* get input type */
+	exp = dom_html_input_element_get_type(input_element, &inputtype);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO, "Could not get input element type");
+		dom_string_unref(inputname);
+		return NSERROR_DOM;
+	}
+
+	/* process according to input element type */
+	if (dom_string_caseless_isequal(inputtype, corestring_dom_submit)) {
+
+		res = form_dom_to_data_input_submit(input_element,
+						    inputname,
+						    charset,
+						    document_charset,
+						    submit_button,
+						    fetch_data_next_ptr);
+
+	} else if (dom_string_caseless_isequal(inputtype,
+					       corestring_dom_image)) {
+
+		res = form_dom_to_data_input_image(input_element,
+						   inputname,
+						   charset,
+						   document_charset,
+						   submit_button,
+						   fetch_data_next_ptr);
+
+	} else if (dom_string_caseless_isequal(inputtype,
+					       corestring_dom_radio) ||
+		   dom_string_caseless_isequal(inputtype,
+					       corestring_dom_checkbox)) {
+
+		res = form_dom_to_data_input_checkbox(input_element,
+						      inputname,
+						      charset,
+						      document_charset,
+						      fetch_data_next_ptr);
+
+	} else if (dom_string_caseless_isequal(inputtype,
+					       corestring_dom_file)) {
+
+		res = form_dom_to_data_input_file(input_element,
+						  inputname,
+						  charset,
+						  document_charset,
+						  fetch_data_next_ptr);
+
+	} else if (dom_string_caseless_isequal(inputtype,
+					       corestring_dom_reset) ||
+		   dom_string_caseless_isequal(inputtype,
+					       corestring_dom_button)) {
+		/* Skip these */
+		NSLOG(netsurf, INFO, "Skipping RESET and BUTTON");
+		res = NSERROR_OK;
+
+	} else {
+		/* Everything else is treated as text values */
+		res = form_dom_to_data_input_text(input_element,
+						  inputname,
+						  charset,
+						  document_charset,
+						  fetch_data_next_ptr);
+
+	}
+
+	dom_string_unref(inputtype);
+	dom_string_unref(inputname);
+
+	return res;
+}
+
+/**
+ * process form HTMLButtonElement into multipart data.
+ *
+ * https://html.spec.whatwg.org/multipage/form-elements.html#the-button-element
+ *
+ * \param button_element The form button DOM element to convert.
+ * \param form_charset The form character set
+ * \param doc_charset The document character set for fallback
+ * \param submit_button The DOM element of the button submitting the form
+ * \param fetch_data_next_ptr The multipart data list being constructed.
+ * \return NSERROR_OK on success or appropriate error code.
+ */
+static nserror
+form_dom_to_data_button(dom_html_button_element *button_element,
+			const char *form_charset,
+			const char *doc_charset,
+			dom_html_element **submit_button,
+			struct fetch_multipart_data ***fetch_data_next_ptr)
+{
+	dom_exception exp; /* the result from DOM operations */
+	bool element_disabled;
+	dom_string *inputname;
+	dom_string *inputvalue;
+	dom_string *inputtype;
+	nserror res = NSERROR_OK;
+
+	/* check if element is disabled */
+	exp = dom_html_button_element_get_disabled(button_element,
+						   &element_disabled);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO,
+		      "Unable to get disabled property. exp %d", exp);
+		return NSERROR_DOM;
+	}
+
+	if (element_disabled) {
+		/* allow enumeration to continue after disabled element */
+		return NSERROR_OK;
+	}
+
+	/* get the type attribute */
+	exp = dom_html_button_element_get_type(button_element, &inputtype);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO, "Could not get button element type");
+		return NSERROR_DOM;
+	}
+
+	/* If the type attribute is "reset" or "button" the element is
+	 *  barred from constraint validation. Specification says
+	 *  default and invalid values result in submit which will
+	 *  be considered.
+	 */
+	if (dom_string_caseless_isequal(inputtype, corestring_dom_reset)) {
+		/* multipart data entry not required for reset type */
+		dom_string_unref(inputtype);
+		return NSERROR_OK;
+	}
+	if (dom_string_caseless_isequal(inputtype, corestring_dom_button)) {
+		/* multipart data entry not required for button type */
+		dom_string_unref(inputtype);
+		return NSERROR_OK;
+	}
+	dom_string_unref(inputtype);
+
+	/* only submision button generates an element */
+	if (*submit_button == NULL) {
+		/* no submission button selected yet so use this one */
+		*submit_button = (dom_html_element *)button_element;
+	}
+	if (*submit_button != (dom_html_element *)button_element) {
+		return NSERROR_OK;
+	}
+
+	/* obtain name property */
+	exp = dom_html_button_element_get_name(button_element, &inputname);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO,
+		      "Could not get button name property. exp %d", exp);
+		return NSERROR_DOM;
+	}
+
+	if (inputname == NULL) {
+		/* allow enumeration to continue after element with no name */
+		return NSERROR_OK;
+	}
+
+	/* get button value and add to fetch data list */
+	exp = dom_html_button_element_get_value(button_element, &inputvalue);
+	if (exp != DOM_NO_ERR) {
+		NSLOG(netsurf, INFO, "Could not get submit button value");
+		res = NSERROR_DOM;
+	} else {
+		res = fetch_data_list_add(inputname,
+					  inputvalue,
+					  NULL,
+					  form_charset,
+					  doc_charset,
+					  fetch_data_next_ptr);
+
+		dom_string_unref(inputvalue);
+	}
+
+	dom_string_unref(inputname);
+
+	return res;
+}
+
+
+/**
+ * Construct multipart data list from 'successful' controls via the DOM.
+ *
+ * All text strings in the successful controls list will be in the charset most
+ * appropriate for submission. Therefore, no utf8_to_* processing should be
+ * performed upon them.
+ *
+ * \todo The chosen charset needs to be made available such that it can be
+ * included in the submission request (e.g. in the fetch's Content-Type header)
+ *
+ * See HTML 4.01 section 17.13.2.
+ *
+ * \note care is taken to abort even if the error is recoverable as it
+ *       is not desirable to submit incomplete form data.
+ *
+ * \param[in] form form to search for successful controls
+ * \param[in] submit_button control used to submit the form, if any
+ * \param[out] fetch_data_out updated to point to linked list of
+ *                             fetch_multipart_data, NULL if no controls
+ * \return NSERROR_OK on success or appropriate error code
+ */
+static nserror
+form_dom_to_data(struct form *form,
+		 struct form_control *submit_control,
+		 struct fetch_multipart_data **fetch_data_out)
+{
+	nserror res = NSERROR_OK;
+	char *charset; /* form characterset */
+	dom_exception exp; /* the result from DOM operations */
+	dom_html_collection *elements = NULL; /* the dom form elements */
+	uint32_t element_count; /* the number of elements in the DOM form */
+	uint32_t element_idx; /* the index of thr enumerated element */
+	dom_node *element = NULL; /* the DOM form element */
+	dom_string *nodename = NULL; /* the DOM node name of the element */
+	struct fetch_multipart_data *fetch_data = NULL; /* fetch data list */
+	struct fetch_multipart_data **fetch_data_next = &fetch_data;
+	dom_html_element *submit_button;
+
+	/* obtain the submit_button DOM node from the control */
+	if (submit_control != NULL) {
+		submit_button = submit_control->node;
+	} else {
+		submit_button = NULL;
+	}
 
 	/** \todo Replace this call with something DOMish */
-	charset = form_acceptable_charset(_form);
+	charset = form_acceptable_charset(form);
 	if (charset == NULL) {
 		NSLOG(netsurf, INFO, "failed to find charset");
-		return false;
+		return NSERROR_NOMEM;
 	}
 
-#define ENCODE_ITEM(i) (((i) == NULL) ? (				\
-			form_encode_item("", 0, charset, _form->document_charset) \
-			):(					\
-			form_encode_item(dom_string_data(i), dom_string_byte_length(i), \
-					 charset, _form->document_charset) \
-			))
-
-	err = dom_html_form_element_get_elements(form, &form_elements);
-
-	if (err != DOM_NO_ERR) {
+	/* obtain the form elements and count */
+	exp = dom_html_form_element_get_elements(form->node, &elements);
+	if (exp != DOM_NO_ERR) {
 		NSLOG(netsurf, INFO, "Could not get form elements");
-		goto dom_no_memory;
+		free(charset);
+		return NSERROR_DOM;
 	}
 
-
-	err = dom_html_collection_get_length(form_elements, &element_count);
-
-	if (err != DOM_NO_ERR) {
+	exp = dom_html_collection_get_length(elements, &element_count);
+	if (exp != DOM_NO_ERR) {
 		NSLOG(netsurf, INFO, "Could not get form element count");
-		goto dom_no_memory;
+		res = NSERROR_DOM;
+		goto form_dom_to_data_error;
 	}
 
-	for (index = 0; index < element_count; index++) {
-		if (form_element != NULL) {
-			dom_node_unref(form_element);
-			form_element = NULL;
-		}
-		if (nodename != NULL) {
-			dom_string_unref(nodename);
-			nodename = NULL;
-		}
-		if (inputname != NULL) {
-			dom_string_unref(inputname);
-			inputname = NULL;
-		}
-		if (inputvalue != NULL) {
-			dom_string_unref(inputvalue);
-			inputvalue = NULL;
-		}
-		if (inputtype != NULL) {
-			dom_string_unref(inputtype);
-			inputtype = NULL;
-		}
-		if (options != NULL) {
-			dom_html_options_collection_unref(options);
-			options = NULL;
-		}
-		err = dom_html_collection_item(form_elements,
-					       index, &form_element);
-		if (err != DOM_NO_ERR) {
+	for (element_idx = 0; element_idx < element_count; element_idx++) {
+		/* obtain a form element */
+		exp = dom_html_collection_item(elements, element_idx, &element);
+		if (exp != DOM_NO_ERR) {
 			NSLOG(netsurf, INFO,
-			      "Could not retrieve form element %d", index);
-			goto dom_no_memory;
+			      "retrieving form element %d failed with %d",
+			      element_idx, exp);
+			res = NSERROR_DOM;
+			goto form_dom_to_data_error;
 		}
 
-		/* Form elements are one of:
-		 *   HTMLButtonElement
-		 *   HTMLInputElement
-		 *   HTMLTextAreaElement
-		 *   HTMLSelectElement
-		 */
-		err = dom_node_get_node_name(form_element, &nodename);
-		if (err != DOM_NO_ERR) {
-			NSLOG(netsurf, INFO, "Could not get node name");
-			goto dom_no_memory;
+		/* node name from element */
+		exp = dom_node_get_node_name(element, &nodename);
+		if (exp != DOM_NO_ERR) {
+			NSLOG(netsurf, INFO,
+			      "getting element node name %d failed with %d",
+			      element_idx, exp);
+			dom_node_unref(element);
+			res = NSERROR_DOM;
+			goto form_dom_to_data_error;
 		}
 
 		if (dom_string_isequal(nodename, corestring_dom_TEXTAREA)) {
-			err = dom_html_text_area_element_get_disabled(
-				(dom_html_text_area_element *)form_element,
-				&element_disabled);
-			if (err != DOM_NO_ERR) {
-				NSLOG(netsurf, INFO,
-				      "Could not get text area disabled property");
-				goto dom_no_memory;
-			}
-			err = dom_html_text_area_element_get_name(
-				(dom_html_text_area_element *)form_element,
-				&inputname);
-			if (err != DOM_NO_ERR) {
-				NSLOG(netsurf, INFO,
-				      "Could not get text area name property");
-				goto dom_no_memory;
-			}
+			/* Form element is HTMLTextAreaElement */
+			res = form_dom_to_data_textarea(
+				(dom_html_text_area_element *)element,
+				charset,
+				form->document_charset,
+				&fetch_data_next);
+
 		} else if (dom_string_isequal(nodename, corestring_dom_SELECT)) {
-			err = dom_html_select_element_get_disabled(
-				(dom_html_select_element *)form_element,
-				&element_disabled);
-			if (err != DOM_NO_ERR) {
-				NSLOG(netsurf, INFO,
-				      "Could not get select disabled property");
-				goto dom_no_memory;
-			}
-			err = dom_html_select_element_get_name(
-				(dom_html_select_element *)form_element,
-				&inputname);
-			if (err != DOM_NO_ERR) {
-				NSLOG(netsurf, INFO,
-				      "Could not get select name property");
-				goto dom_no_memory;
-			}
+			/* Form element is HTMLSelectElement */
+			res = form_dom_to_data_select(
+				(dom_html_select_element *)element,
+				charset,
+				form->document_charset,
+				&fetch_data_next);
+
 		} else if (dom_string_isequal(nodename, corestring_dom_INPUT)) {
-			err = dom_html_input_element_get_disabled(
-				(dom_html_input_element *)form_element,
-				&element_disabled);
-			if (err != DOM_NO_ERR) {
-				NSLOG(netsurf, INFO,
-				      "Could not get input disabled property");
-				goto dom_no_memory;
-			}
-			err = dom_html_input_element_get_name(
-				(dom_html_input_element *)form_element,
-				&inputname);
-			if (err != DOM_NO_ERR) {
-				NSLOG(netsurf, INFO,
-				      "Could not get input name property");
-				goto dom_no_memory;
-			}
+			/* Form element is HTMLInputElement */
+			res = form_dom_to_data_input(
+				(dom_html_input_element *)element,
+				charset,
+				form->document_charset,
+				&submit_button,
+				&fetch_data_next);
+
 		} else if (dom_string_isequal(nodename, corestring_dom_BUTTON)) {
-			err = dom_html_button_element_get_disabled(
-				(dom_html_button_element *)form_element,
-				&element_disabled);
-			if (err != DOM_NO_ERR) {
-				NSLOG(netsurf, INFO,
-				      "Could not get button disabled property");
-				goto dom_no_memory;
-			}
-			err = dom_html_button_element_get_name(
-				(dom_html_button_element *)form_element,
-				&inputname);
-			if (err != DOM_NO_ERR) {
-				NSLOG(netsurf, INFO,
-				      "Could not get button name property");
-				goto dom_no_memory;
-			}
+			/* Form element is HTMLButtonElement */
+			res = form_dom_to_data_button(
+				(dom_html_button_element *)element,
+				charset,
+				form->document_charset,
+				&submit_button,
+				&fetch_data_next);
+
 		} else {
-			/* Unknown element type came through! */
-			NSLOG(netsurf, INFO, "Unknown element type: %*s",
+			/* Form element is not handled */
+			NSLOG(netsurf, INFO,
+			      "Unhandled element type: %*s",
 			      (int)dom_string_byte_length(nodename),
 			      dom_string_data(nodename));
-			goto dom_no_memory;
-		}
-		if (element_disabled)
-			continue;
-		if (inputname == NULL)
-			continue;
+			res = NSERROR_DOM;
 
-		if (dom_string_isequal(nodename, corestring_dom_TEXTAREA)) {
-			err = dom_html_text_area_element_get_value(
-				(dom_html_text_area_element *)form_element,
-				&inputvalue);
-			if (err != DOM_NO_ERR) {
-				NSLOG(netsurf, INFO,
-				      "Could not get text area content");
-				goto dom_no_memory;
-			}
-		} else if (dom_string_isequal(nodename, corestring_dom_SELECT)) {
-			uint32_t options_count, option_index;
-			err = dom_html_select_element_get_options(
-				(dom_html_select_element *)form_element,
-				&options);
-			if (err != DOM_NO_ERR) {
-				NSLOG(netsurf, INFO,
-				      "Could not get select options collection");
-				goto dom_no_memory;
-			}
-			err = dom_html_options_collection_get_length(
-				options, &options_count);
-			if (err != DOM_NO_ERR) {
-				NSLOG(netsurf, INFO,
-				      "Could not get select options collection length");
-				goto dom_no_memory;
-			}
-			for(option_index = 0; option_index < options_count;
-					++option_index) {
-				bool selected;
-				if (option_element != NULL) {
-					dom_node_unref(option_element);
-					option_element = NULL;
-				}
-				if (inputvalue != NULL) {
-					dom_string_unref(inputvalue);
-					inputvalue = NULL;
-				}
-				err = dom_html_options_collection_item(
-					options, option_index, &option_element);
-				if (err != DOM_NO_ERR) {
-					NSLOG(netsurf, INFO,
-					      "Could not get options item %d",
-					      option_index);
-					goto dom_no_memory;
-				}
-				err = dom_html_option_element_get_selected(
-					(dom_html_option_element *)option_element,
-					&selected);
-				if (err != DOM_NO_ERR) {
-					NSLOG(netsurf, INFO,
-					      "Could not get option selected property");
-					goto dom_no_memory;
-				}
-				if (!selected)
-					continue;
-				err = dom_html_option_element_get_value(
-					(dom_html_option_element *)option_element,
-					&inputvalue);
-				if (err != DOM_NO_ERR) {
-					NSLOG(netsurf, INFO,
-					      "Could not get option value");
-					goto dom_no_memory;
-				}
-
-				success_new = calloc(1, sizeof(*success_new));
-				if (success_new == NULL) {
-					NSLOG(netsurf, INFO,
-					      "Could not allocate data for option");
-					goto dom_no_memory;
-				}
-
-				last_success->next = success_new;
-				last_success = success_new;
-
-				success_new->name = ENCODE_ITEM(inputname);
-				if (success_new->name == NULL) {
-					NSLOG(netsurf, INFO,
-					      "Could not encode name for option");
-					goto dom_no_memory;
-				}
-				success_new->value = ENCODE_ITEM(inputvalue);
-				if (success_new->value == NULL) {
-					NSLOG(netsurf, INFO,
-					      "Could not encode value for option");
-					goto dom_no_memory;
-				}
-			}
-			continue;
-		} else if (dom_string_isequal(nodename, corestring_dom_BUTTON)) {
-			err = dom_html_button_element_get_type(
-				(dom_html_button_element *) form_element,
-				&inputtype);
-			if (err != DOM_NO_ERR) {
-				NSLOG(netsurf, INFO,
-				      "Could not get button element type");
-				goto dom_no_memory;
-			}
-			if (dom_string_caseless_isequal(
-				    inputtype, corestring_dom_submit)) {
-
-				if (submit_button == NULL && !had_submit) {
-					/* no button used, and first submit
-					 * node found, so use it
-					 */
-					had_submit = true;
-				} else if ((dom_node *)submit_button !=
-					   (dom_node *)form_element) {
-					continue;
-				}
-
-				err = dom_html_button_element_get_value(
-					(dom_html_button_element *)form_element,
-					&inputvalue);
-				if (err != DOM_NO_ERR) {
-					NSLOG(netsurf, INFO,
-					      "Could not get submit button value");
-					goto dom_no_memory;
-				}
-				/* Drop through to report successful button */
-			} else {
-				continue;
-			}
-		} else if (dom_string_isequal(nodename, corestring_dom_INPUT)) {
-			/* Things to consider here */
-			/* Buttons -- only if the successful control */
-			/* radio and checkbox -- only if selected */
-			/* file -- also get the rawfile */
-			/* everything else -- just value */
-			err = dom_html_input_element_get_type(
-				(dom_html_input_element *) form_element,
-				&inputtype);
-			if (err != DOM_NO_ERR) {
-				NSLOG(netsurf, INFO,
-				      "Could not get input element type");
-				goto dom_no_memory;
-			}
-			if (dom_string_caseless_isequal(
-				    inputtype, corestring_dom_submit)) {
-
-				if (submit_button == NULL && !had_submit) {
-					/* no button used, and first submit
-					 * node found, so use it
-					 */
-					had_submit = true;
-				} else if ((dom_node *)submit_button !=
-					   (dom_node *)form_element) {
-					continue;
-				}
-
-				err = dom_html_input_element_get_value(
-					(dom_html_input_element *)form_element,
-					&inputvalue);
-				if (err != DOM_NO_ERR) {
-					NSLOG(netsurf, INFO,
-					      "Could not get submit button value");
-					goto dom_no_memory;
-				}
-				/* Drop through to report the successful button */
-			} else if (dom_string_caseless_isequal(
-					   inputtype, corestring_dom_image)) {
-				/* We *ONLY* use an image input if it was the
-				 * thing which activated us
-				 */
-				 if ((dom_node *)submit_button !=
-				     (dom_node *)form_element)
-					 continue;
-
-				 err = dom_node_get_user_data(
-					 form_element,
-					 corestring_dom___ns_key_image_coords_node_data,
-					 &coords);
-				 if (err != DOM_NO_ERR) {
-					 NSLOG(netsurf, INFO,
-					       "Could not get image XY data");
-					 goto dom_no_memory;
-				 }
-				 if (coords == NULL) {
-					 NSLOG(netsurf, INFO,
-					       "No XY data on the image input");
-					 goto dom_no_memory;
-				 }
-
-				 basename = ENCODE_ITEM(inputname);
-
-				 success_new = calloc(1, sizeof(*success_new));
-				 if (success_new == NULL) {
-					 free(basename);
-					 NSLOG(netsurf, INFO,
-					       "Could not allocate data for image.x");
-					 goto dom_no_memory;
-				 }
-
-				 last_success->next = success_new;
-				 last_success = success_new;
-
-				 success_new->name = malloc(strlen(basename) + 3);
-				 if (success_new->name == NULL) {
-					 free(basename);
-					 NSLOG(netsurf, INFO,
-					       "Could not allocate name for image.x");
-					 goto dom_no_memory;
-				 }
-				 success_new->value = malloc(20);
-				 if (success_new->value == NULL) {
-					 free(basename);
-					 NSLOG(netsurf, INFO,
-					       "Could not allocate value for image.x");
-					 goto dom_no_memory;
-				 }
-				 sprintf(success_new->name, "%s.x", basename);
-				 sprintf(success_new->value, "%d", coords->x);
-
-				 success_new = calloc(1, sizeof(*success_new));
-				 if (success_new == NULL) {
-					 free(basename);
-					 NSLOG(netsurf, INFO,
-					       "Could not allocate data for image.y");
-					 goto dom_no_memory;
-				 }
-
-				 last_success->next = success_new;
-				 last_success = success_new;
-
-				 success_new->name = malloc(strlen(basename) + 3);
-				 if (success_new->name == NULL) {
-					 free(basename);
-					 NSLOG(netsurf, INFO,
-					       "Could not allocate name for image.y");
-					 goto dom_no_memory;
-				 }
-				 success_new->value = malloc(20);
-				 if (success_new->value == NULL) {
-					 free(basename);
-					 NSLOG(netsurf, INFO,
-					       "Could not allocate value for image.y");
-					 goto dom_no_memory;
-				 }
-				 sprintf(success_new->name, "%s.y", basename);
-				 sprintf(success_new->value, "%d", coords->y);
-				 free(basename);
-				 continue;
-			} else if (dom_string_caseless_isequal(
-					   inputtype, corestring_dom_radio) ||
-				   dom_string_caseless_isequal(
-					   inputtype, corestring_dom_checkbox)) {
-				err = dom_html_input_element_get_checked(
-					(dom_html_input_element *)form_element,
-					&checked);
-				if (err != DOM_NO_ERR) {
-					NSLOG(netsurf, INFO,
-					      "Could not get input element checked");
-					goto dom_no_memory;
-				}
-				if (!checked)
-					continue;
-				err = dom_html_input_element_get_value(
-					(dom_html_input_element *)form_element,
-					&inputvalue);
-				if (err != DOM_NO_ERR) {
-					NSLOG(netsurf, INFO,
-					      "Could not get input element value");
-					goto dom_no_memory;
-				}
-				if (inputvalue == NULL) {
-					inputvalue = dom_string_ref(
-						corestring_dom_on);
-				}
-				/* Fall through to simple allocation */
-			} else if (dom_string_caseless_isequal(
-					   inputtype, corestring_dom_file)) {
-
-				err = dom_html_input_element_get_value(
-					(dom_html_input_element *)form_element,
-					&inputvalue);
-				if (err != DOM_NO_ERR) {
-					NSLOG(netsurf, INFO,
-					      "Could not get file value");
-					goto dom_no_memory;
-				}
-				err = dom_node_get_user_data(
-					form_element,
-					corestring_dom___ns_key_file_name_node_data,
-					&rawfile_temp);
-				if (err != DOM_NO_ERR) {
-					NSLOG(netsurf, INFO,
-					      "Could not get file rawname");
-					goto dom_no_memory;
-				}
-				rawfile_temp = strdup(rawfile_temp != NULL ?
-						      rawfile_temp :
-						      "");
-				if (rawfile_temp == NULL) {
-					NSLOG(netsurf, INFO,
-					      "Could not copy file rawname");
-					goto dom_no_memory;
-				}
-				/* Fall out to the allocation */
-			} else if (dom_string_caseless_isequal(
-					   inputtype, corestring_dom_reset) ||
-				   dom_string_caseless_isequal(
-					   inputtype, corestring_dom_button)) {
-				/* Skip these */
-				NSLOG(netsurf, INFO,
-				      "Skipping RESET and BUTTON");
-				continue;
-			} else {
-				/* Everything else is treated as text values */
-				err = dom_html_input_element_get_value(
-					(dom_html_input_element *)form_element,
-					&inputvalue);
-				if (err != DOM_NO_ERR) {
-					NSLOG(netsurf, INFO,
-					      "Could not get input value");
-					goto dom_no_memory;
-				}
-				/* Fall out to the allocation */
-			}
 		}
 
-		success_new = calloc(1, sizeof(*success_new));
-		if (success_new == NULL) {
-			NSLOG(netsurf, INFO,
-			      "Could not allocate data for generic");
-			goto dom_no_memory;
-		}
+		dom_string_unref(nodename);
+		dom_node_unref(element);
 
-		last_success->next = success_new;
-		last_success = success_new;
-
-		success_new->name = ENCODE_ITEM(inputname);
-		if (success_new->name == NULL) {
-			NSLOG(netsurf, INFO,
-			      "Could not encode name for generic");
-			goto dom_no_memory;
-		}
-		success_new->value = ENCODE_ITEM(inputvalue);
-		if (success_new->value == NULL) {
-			NSLOG(netsurf, INFO,
-			      "Could not encode value for generic");
-			goto dom_no_memory;
-		}
-		if (rawfile_temp != NULL) {
-			success_new->file = true;
-			success_new->rawfile = rawfile_temp;
-			rawfile_temp = NULL;
+		/* abort form element enumeration on error */
+		if (res != NSERROR_OK) {
+			goto form_dom_to_data_error;
 		}
 	}
 
+	*fetch_data_out = fetch_data;
+	dom_html_collection_unref(elements);
 	free(charset);
 
-	if (form_element != NULL) {
-		dom_node_unref(form_element);
-	}
+	return NSERROR_OK;
 
-	if (form_elements != NULL) {
-		dom_html_collection_unref(form_elements);
-	}
-
-	if (nodename != NULL) {
-		dom_string_unref(nodename);
-	}
-
-	if (inputname != NULL) {
-		dom_string_unref(inputname);
-	}
-
-	if (inputvalue != NULL) {
-		dom_string_unref(inputvalue);
-	}
-
-	if (options != NULL) {
-		dom_html_options_collection_unref(options);
-	}
-
-	if (option_element != NULL) {
-		dom_node_unref(option_element);
-	}
-
-	if (inputtype != NULL) {
-		dom_string_unref(inputtype);
-	}
-
-	if (rawfile_temp != NULL) {
-		free(rawfile_temp);
-	}
-
-	*successful_controls = sentinel.next;
-
-	return true;
-
-dom_no_memory:
+form_dom_to_data_error:
+	fetch_multipart_data_destroy(fetch_data);
+	dom_html_collection_unref(elements);
 	free(charset);
-	fetch_multipart_data_destroy(sentinel.next);
 
-	if (form_elements != NULL)
-		dom_html_collection_unref(form_elements);
-	if (form_element != NULL)
-		dom_node_unref(form_element);
-	if (nodename != NULL)
-		dom_string_unref(nodename);
-	if (inputname != NULL)
-		dom_string_unref(inputname);
-	if (inputvalue != NULL)
-		dom_string_unref(inputvalue);
-	if (options != NULL)
-		dom_html_options_collection_unref(options);
-	if (option_element != NULL)
-		dom_node_unref(option_element);
-	if (inputtype != NULL)
-		dom_string_unref(inputtype);
-	if (rawfile_temp != NULL)
-		free(rawfile_temp);
-
-	return false;
+	return res;
 }
-#undef ENCODE_ITEM
 
 /**
  * Encode controls using application/x-www-form-urlencoded.
  *
- * \param  form  form to which successful controls relate
- * \param  control  linked list of fetch_multipart_data
- * \param  query_string  iff true add '?' to the start of returned data
- * \return  URL-encoded form, or 0 on memory exhaustion
+ * \param[in] form form to which successful controls relate
+ * \param[in] control linked list of fetch_multipart_data
+ * \param[out] encoded_out URL-encoded form data
+ * \return NSERROR_OK on success and \a encoded_out updated else appropriate error code
  */
-
-static char *form_url_encode(struct form *form,
+static nserror
+form_url_encode(struct form *form,
 		struct fetch_multipart_data *control,
-		bool query_string)
+		char **encoded_out)
 {
 	char *name, *value;
 	char *s, *s2;
 	unsigned int len, len1, len_init;
-	nserror url_err;
+	nserror res;
 
-	if (query_string)
-		s = malloc(2);
-	else
-		s = malloc(1);
+	s = malloc(1);
 
-	if (s == NULL)
-		return NULL;
-
-	if (query_string) {
-		s[0] = '?';
-		s[1] = '\0';
-		len_init = len = 1;
-	} else {
-		s[0] = '\0';
-		len_init = len = 0;
+	if (s == NULL) {
+		return NSERROR_NOMEM;
 	}
 
+	s[0] = '\0';
+	len_init = len = 0;
+
 	for (; control; control = control->next) {
-		url_err = url_escape(control->name, true, NULL, &name);
-		if (url_err == NSERROR_NOMEM) {
+		res = url_escape(control->name, true, NULL, &name);
+		if (res != NSERROR_OK) {
 			free(s);
-			return NULL;
+			return res;
 		}
 
-		assert(url_err == NSERROR_OK);
-
-		url_err = url_escape(control->value, true, NULL, &value);
-		if (url_err == NSERROR_NOMEM) {
+		res = url_escape(control->value, true, NULL, &value);
+		if (res != NSERROR_OK) {
 			free(name);
 			free(s);
-			return NULL;
+			return res;
 		}
-
-		assert(url_err == NSERROR_OK);
 
 		/* resize string to allow for new key/value pair,
 		 *  equals, amphersand and terminator
 		 */
 		len1 = len + strlen(name) + strlen(value) + 2;
 		s2 = realloc(s, len1 + 1);
-		if (!s2) {
+		if (s2 == NULL) {
 			free(value);
 			free(name);
 			free(s);
-			return NULL;
+			return NSERROR_NOMEM;
 		}
 		s = s2;
 
@@ -995,7 +1343,10 @@ static char *form_url_encode(struct form *form,
 		/* Replace trailing '&' */
 		s[len - 1] = '\0';
 	}
-	return s;
+
+	*encoded_out = s;
+
+	return NSERROR_OK;
 }
 
 /**
@@ -1008,17 +1359,15 @@ char *form_acceptable_charset(struct form *form)
 {
 	char *temp, *c;
 
-	if (!form)
-		return NULL;
-
 	if (!form->accept_charsets) {
 		/* no accept-charsets attribute for this form */
-		if (form->document_charset)
+		if (form->document_charset) {
 			/* document charset present, so use it */
 			return strdup(form->document_charset);
-		else
+		} else {
 			/* no document charset, so default to 8859-1 */
 			return strdup("ISO-8859-1");
+		}
 	}
 
 	/* make temporary copy of accept-charsets attribute */
@@ -1074,8 +1423,11 @@ char *form_acceptable_charset(struct form *form)
  *                 used iff converting to charset fails
  * \return Pointer to converted string (on heap, caller frees), or NULL
  */
-char *form_encode_item(const char *item, uint32_t len, const char *charset,
-		const char *fallback)
+char *
+form_encode_item(const char *item,
+		 uint32_t len,
+		 const char *charset,
+		 const char *fallback)
 {
 	nserror err;
 	char *ret = NULL;
@@ -1768,98 +2120,85 @@ void form_radio_set(struct form_control *radio)
 }
 
 
-/**
- * Collect controls and submit a form.
- */
-
-void form_submit(nsurl *page_url, struct browser_window *target,
-		struct form *form, struct form_control *submit_button)
+/* private interface described in html/form_internal.h */
+nserror
+form_submit(nsurl *page_url,
+	    struct browser_window *target,
+	    struct form *form,
+	    struct form_control *submit_button)
 {
-	char *data = NULL;
-	struct fetch_multipart_data *success;
+	nserror res;
+	char *data = NULL; /* encoded form data */
+	struct fetch_multipart_data *success = NULL; /* gcc is incapable of correctly reasoning about use and generates "maybe used uninitialised" warnings */
 	nsurl *action_url;
-	nsurl *action_query;
-	nserror error;
+	nsurl *query_url;
 
 	assert(form != NULL);
 
-	if (form_successful_controls_dom(form, submit_button, &success) == false) {
-		guit->misc->warning("NoMemory", 0);
-		return;
+	/* obtain list of controls from DOM */
+	res = form_dom_to_data(form, submit_button, &success);
+	if (res != NSERROR_OK) {
+		return res;
 	}
 
 	/* Decompose action */
-	if (nsurl_create(form->action, &action_url) != NSERROR_OK) {
-		free(data);
+	res = nsurl_create(form->action, &action_url);
+	if (res != NSERROR_OK) {
 		fetch_multipart_data_destroy(success);
-		guit->misc->warning("NoMemory", 0);
-		return;
+		return res;
 	}
 
 	switch (form->method) {
 	case method_GET:
-		data = form_url_encode(form, success, true);
-		if (data == NULL) {
-			fetch_multipart_data_destroy(success);
-			guit->misc->warning("NoMemory", 0);
-			return;
-		}
+		res = form_url_encode(form, success, &data);
+		if (res == NSERROR_OK) {
+			/* Replace query segment */
+			res = nsurl_replace_query(action_url, data, &query_url);
+			if (res == NSERROR_OK) {
+				res = browser_window_navigate(target,
+							      query_url,
+							      page_url,
+							      BW_NAVIGATE_HISTORY,
+							      NULL,
+							      NULL,
+							      NULL);
 
-		/* Replace query segment */
-		error = nsurl_replace_query(action_url, data, &action_query);
-		if (error != NSERROR_OK) {
-			nsurl_unref(action_query);
+				nsurl_unref(query_url);
+			}
 			free(data);
-			fetch_multipart_data_destroy(success);
-			guit->misc->warning(messages_get_errorcode(error), 0);
-			return;
 		}
-
-		/* Construct submit url */
-		browser_window_navigate(target,
-					action_query,
-					page_url,
-					BW_NAVIGATE_HISTORY,
-					NULL,
-					NULL,
-					NULL);
-
-		nsurl_unref(action_query);
 		break;
 
 	case method_POST_URLENC:
-		data = form_url_encode(form, success, false);
-		if (data == NULL) {
-			fetch_multipart_data_destroy(success);
-			guit->misc->warning("NoMemory", 0);
-			nsurl_unref(action_url);
-			return;
+		res = form_url_encode(form, success, &data);
+		if (res == NSERROR_OK) {
+			res = browser_window_navigate(target,
+						      action_url,
+						      page_url,
+						      BW_NAVIGATE_HISTORY,
+						      data,
+						      NULL,
+						      NULL);
+			free(data);
 		}
-
-		browser_window_navigate(target,
-					action_url,
-					page_url,
-					BW_NAVIGATE_HISTORY,
-					data,
-					NULL,
-					NULL);
 		break;
 
 	case method_POST_MULTIPART:
-		browser_window_navigate(target,
-					action_url,
-					page_url,
-					BW_NAVIGATE_HISTORY,
-					NULL,
-					success,
-					NULL);
+		res = browser_window_navigate(target,
+					      action_url,
+					      page_url,
+					      BW_NAVIGATE_HISTORY,
+					      NULL,
+					      success,
+					      NULL);
 
 		break;
 	}
 
 	nsurl_unref(action_url);
 	fetch_multipart_data_destroy(success);
-	free(data);
+
+	return res;
 }
 
 void form_gadget_update_value(struct form_control *control, char *value)

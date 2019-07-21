@@ -218,6 +218,7 @@ ami_crtvrfy_create_window(struct ami_crtvrfy_window *crtvrfy_win)
 {
 	struct ami_corewindow *ami_cw = (struct ami_corewindow *)&crtvrfy_win->core;
 	ULONG refresh_mode = WA_SmartRefresh;
+	struct Screen *scrn = ami_gui_get_screen();
 
 	if(nsoption_bool(window_simple_refresh) == true) {
 		refresh_mode = WA_SimpleRefresh;
@@ -242,7 +243,7 @@ ami_crtvrfy_create_window(struct ami_crtvrfy_window *crtvrfy_win)
 		WINDOW_IDCMPHook, &ami_cw->idcmp_hook,
 		WINDOW_IDCMPHookBits, IDCMP_IDCMPUPDATE | IDCMP_EXTENDEDMOUSE |
 				IDCMP_SIZEVERIFY | IDCMP_REFRESHWINDOW,
-		WINDOW_SharedPort, sport,
+		WINDOW_SharedPort, ami_gui_get_shared_msgport(),
 		WINDOW_UserData, crtvrfy_win,
 		/* WINDOW_NewMenu, twin->menu,   -> No menu for SSL Cert */
 		WINDOW_IconifyGadget, FALSE,

@@ -490,6 +490,7 @@ static inline struct BitMap *ami_bitmap_get_generic(struct bitmap *bitmap,
 			int width, int height, struct BitMap *restrict friendbm, int type)
 {
 	struct BitMap *restrict tbm = NULL;
+	struct Screen *scrn = ami_gui_get_screen();
 
 	if(bitmap->nativebm)
 	{
@@ -531,17 +532,22 @@ static inline struct BitMap *ami_bitmap_get_generic(struct bitmap *bitmap,
 				}
 
 				ami_bitmap_rgba_to_argb(bitmap);
-				bitmap->drawhandle = ObtainDrawHandle(NULL,
-										&rp, scrn->ViewPort.ColorMap,
-										GGFX_DitherMode, dithermode,
-										TAG_DONE);
+				bitmap->drawhandle = ObtainDrawHandle(
+					NULL,
+					&rp,
+					scrn->ViewPort.ColorMap,
+					GGFX_DitherMode, dithermode,
+					TAG_DONE);
+				if(bitmap->drawhandle) {
+					APTR ddh = CreateDirectDrawHandle(bitmap->drawhandle,
+											bitmap->width, bitmap->height,
+											width, height, NULL);
 
-				APTR ddh = CreateDirectDrawHandle(bitmap->drawhandle,
-										bitmap->width, bitmap->height,
-										width, height, NULL);
-
-				DirectDrawTrueColor(ddh, (ULONG *)amiga_bitmap_get_buffer(bitmap), 0, 0, TAG_DONE);
-				DeleteDirectDrawHandle(ddh);
+					DirectDrawTrueColor(ddh, (ULONG *)amiga_bitmap_get_buffer(bitmap), 0, 0, TAG_DONE);
+					DeleteDirectDrawHandle(ddh);
+					ReleaseDrawHandle(bitmap->drawhandle);
+					bitmap->drawhandle = NULL;
+				}
 				ami_bitmap_argb_to_rgba(bitmap);
 			} else {
 				if(guigfx_warned == false) {
