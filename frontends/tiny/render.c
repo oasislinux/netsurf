@@ -16,7 +16,6 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <complex.h>
 #include <stdbool.h>
 #include <pixman.h>
 #include <math.h>
@@ -29,6 +28,7 @@
 #include FT_OUTLINE_H
 #include FT_SIZES_H
 #include FT_STROKER_H
+#include FT_TRIGONOMETRY_H
 
 #include "utils/errors.h"
 #include "utils/filepath.h"
@@ -682,8 +682,8 @@ plot_arc(const struct redraw_context *ctx, const plot_style_t *style, int x, int
 	FT_Stroker stroker = NULL;
 	FT_Outline outline;
 	FT_UInt ncontours, npoints;
-	double complex z, p1, p2, c1, c2, k[3], rot;
-	double theta;
+	FT_Vector p, c1, c2;
+	FT_Angle theta;
 	int n;
 
 	if (angle2 <= angle1 || r <= 0)
@@ -696,36 +696,35 @@ plot_arc(const struct redraw_context *ctx, const plot_style_t *style, int x, int
 		goto err;
 	FT_Stroker_Set(stroker, 32, FT_STROKER_LINECAP_BUTT, FT_STROKER_LINEJOIN_BEVEL, 0);
 
+	/* number of arc segments */
+	n = (angle2 - angle1 + 89) / 90;
+
 	x <<= 6;
 	y <<= 6;
 	r <<= 6;
+	angle1 <<= 16;
+	angle2 <<= 16;
 
-	/* number of arc segments */
-	n = (angle2 - angle1 + 89) / 90;
 	/* arc segment angle */
-	theta = (angle2 - angle1) * M_PI / (180 * n);
-	/* rotation to the next arc segment */
-	rot = cexp(I * theta);
-	/* end points of arc segment, relative to bisector */
-	p2 = cexp(I * theta / 2);
-	p1 = CMPLX(creal(p2), -cimag(p2));
+	theta = (angle2 - angle1) / n;
+	/* end point of arc segment, relative to bisector */
+	FT_Vector_From_Polar(&p, r, theta / 2);
 	/* control points of arc segment, relative to bisector */
-	c2 = CMPLX((4 - creal(p2)) / 3, (1 - creal(p2)) * (3 - creal(p2)) / (3 * cimag(p2)));
-	c1 = CMPLX(creal(c2), -cimag(c2));
-	/* bisector of the arc segment */
-	z = r * cexp(I * (angle1 * M_PI / 180 + theta / 2));
+	c2.x = (4 * r - p.x) / 3;
+	c2.y = FT_MulDiv(r - p.x, 3 * r - p.x, 3 * p.y);
+	c1.x = c2.x;
+	c1.y = -c2.y;
 
-#define VEC(z) &(FT_Vector){creal(z), cimag(z)}
-	k[0] = p1 * z;
-	FT_Stroker_BeginSubPath(stroker, VEC(k[0]), 1);
+	FT_Vector_Rotate(&p, angle1 - theta / 2);
+	FT_Vector_Rotate(&c1, angle1 + theta / 2);
+	FT_Vector_Rotate(&c2, angle1 + theta / 2);
+	FT_Stroker_BeginSubPath(stroker, &p, 1);
 	for (; n > 0; --n) {
-		k[0] = c1 * z;
-		k[1] = c2 * z;
-		k[2] = p2 * z;
-		FT_Stroker_CubicTo(stroker, VEC(k[0]), VEC(k[1]), VEC(k[2]));
-		z *= rot;
+		FT_Vector_Rotate(&p, theta);
+		FT_Stroker_CubicTo(stroker, &c1, &c2, &p);
+		FT_Vector_Rotate(&c1, theta);
+		FT_Vector_Rotate(&c2, theta);
 	}
-#undef VEC
 	FT_Stroker_EndSubPath(stroker);
 	err = fterror(FT_Stroker_GetCounts(stroker, &npoints, &ncontours));
 	if (err != NSERROR_OK)
