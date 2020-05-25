@@ -20,15 +20,17 @@
 #include <libwapcaplet/libwapcaplet.h>
 #include <dom/dom.h>
 
-#include "content/content_protected.h"
-#include "content/fetch.h"
-#include "content/hlcache.h"
-#include "desktop/system_colour.h"
+#include "utils/errors.h"
 #include "utils/corestrings.h"
 #include "utils/utils.h"
 #include "utils/http.h"
 #include "utils/log.h"
 #include "utils/messages.h"
+#include "content/content_protected.h"
+#include "content/content_factory.h"
+#include "content/fetch.h"
+#include "content/hlcache.h"
+#include "desktop/system_colour.h"
 
 #include "css/css.h"
 #include "css/hints.h"
@@ -168,7 +170,7 @@ nscss_create(const content_handler *handler,
 			xnsbase, charset, result->base.quirks,
 			nscss_content_done, result);
 	if (error != NSERROR_OK) {
-		content_broadcast_errorcode(&result->base, NSERROR_NOMEM);
+		content_broadcast_error(&result->base, NSERROR_NOMEM, NULL);
 		if (charset_value != NULL)
 			lwc_string_unref(charset_value);
 		free(result);
@@ -251,7 +253,7 @@ nscss_process_data(struct content *c, const char *data, unsigned int size)
 
 	error = nscss_process_css_data(&css->data, data, size);
 	if (error != CSS_OK && error != CSS_NEEDDATA) {
-		content_broadcast_errorcode(c, NSERROR_CSS);
+		content_broadcast_error(c, NSERROR_CSS, NULL);
 	}
 
 	return (error == CSS_OK || error == CSS_NEEDDATA);
@@ -285,7 +287,7 @@ bool nscss_convert(struct content *c)
 
 	error = nscss_convert_css_data(&css->data);
 	if (error != CSS_OK) {
-		content_broadcast_errorcode(c, NSERROR_CSS);
+		content_broadcast_error(c, NSERROR_CSS, NULL);
 		return false;
 	}
 
@@ -480,7 +482,7 @@ void nscss_content_done(struct content_css_data *css, void *pw)
 	/* Retrieve the size of this sheet */
 	error = css_stylesheet_size(css->sheet, &size);
 	if (error != CSS_OK) {
-		content_broadcast_errorcode(c, NSERROR_CSS);
+		content_broadcast_error(c, NSERROR_CSS, NULL);
 		content_set_error(c);
 		return;
 	}
@@ -634,7 +636,6 @@ nserror nscss_import(hlcache_handle *handle,
 		error = nscss_import_complete(ctx);
 		break;
 
-	case CONTENT_MSG_ERRORCODE:
 	case CONTENT_MSG_ERROR:
 		hlcache_handle_release(handle);
 		ctx->css->imports[ctx->index].c = NULL;
@@ -642,7 +643,6 @@ nserror nscss_import(hlcache_handle *handle,
 		error = nscss_import_complete(ctx);
 		/* Already released handle */
 		break;
-
 	default:
 		break;
 	}

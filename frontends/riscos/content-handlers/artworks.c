@@ -38,7 +38,9 @@
 #include "utils/utils.h"
 #include "netsurf/plotters.h"
 #include "netsurf/content.h"
+#include "content/content.h"
 #include "content/content_protected.h"
+#include "content/content_factory.h"
 #include "content/llcache.h"
 
 #include "riscos/content-handlers/artworks.h"
@@ -184,7 +186,8 @@ bool artworks_convert(struct content *c)
 				&used, NULL, NULL);
 	if (used >= 0) {
 		NSLOG(netsurf, INFO, "Alias$LoadArtWorksModules not defined");
-		msg_data.error = messages_get("AWNotSeen");
+		msg_data.errordata.errorcode = NSERROR_UNKNOWN;
+		msg_data.errordata.errormsg = messages_get("AWNotSeen");
 		content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 		return false;
 	}
@@ -194,7 +197,8 @@ bool artworks_convert(struct content *c)
 	if (error) {
 		NSLOG(netsurf, INFO, "xos_cli: 0x%x: %s", error->errnum,
 		      error->errmess);
-		msg_data.error = error->errmess;
+		msg_data.errordata.errorcode = NSERROR_UNKNOWN;
+		msg_data.errordata.errormsg = error->errmess;
 		content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 		return false;
 	}
@@ -205,7 +209,8 @@ bool artworks_convert(struct content *c)
 	if (error) {
 		NSLOG(netsurf, INFO, "AWRender_FileInitAddress: 0x%x: %s",
 		      error->errnum, error->errmess);
-		msg_data.error = error->errmess;
+		msg_data.errordata.errorcode = NSERROR_UNKNOWN;
+		msg_data.errordata.errormsg = error->errmess;
 		content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 		return false;
 	}
@@ -216,7 +221,8 @@ bool artworks_convert(struct content *c)
 	if (error) {
 		NSLOG(netsurf, INFO, "AWRender_RenderAddress: 0x%x: %s",
 		      error->errnum, error->errmess);
-		msg_data.error = error->errmess;
+		msg_data.errordata.errorcode = NSERROR_UNKNOWN;
+		msg_data.errordata.errormsg = error->errmess;
 		content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 		return false;
 	}
@@ -229,7 +235,8 @@ bool artworks_convert(struct content *c)
 	if (error) {
 		NSLOG(netsurf, INFO, "awrender_init: 0x%x : %s",
 		      error->errnum, error->errmess);
-		msg_data.error = error->errmess;
+		msg_data.errordata.errorcode = NSERROR_UNKNOWN;
+		msg_data.errordata.errormsg = error->errmess;
 		content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 		return false;
 	}
@@ -245,7 +252,8 @@ bool artworks_convert(struct content *c)
 	if (error) {
 		NSLOG(netsurf, INFO, "AWRender_DocBounds: 0x%x: %s",
 		      error->errnum, error->errmess);
-		msg_data.error = error->errmess;
+		msg_data.errordata.errorcode = NSERROR_UNKNOWN;
+		msg_data.errordata.errormsg = error->errmess;
 		content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 		return false;
 	}
@@ -261,7 +269,8 @@ bool artworks_convert(struct content *c)
 	if (!aw->block) {
 		NSLOG(netsurf, INFO,
 		      "failed to create block for ArtworksRenderer");
-		msg_data.error = messages_get("NoMemory");
+		msg_data.errordata.errorcode = NSERROR_NOMEM;
+		msg_data.errordata.errormsg = messages_get("NoMemory");
 		content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 		return false;
 	}

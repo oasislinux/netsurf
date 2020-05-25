@@ -60,14 +60,17 @@ struct dom_html_br_element;
 #include "Document.bnd"
 #include "Node.bnd"
 #include "NodeList.bnd"
+#include "NamedNodeMap.bnd"
 #include "Element.bnd"
 #include "HTMLCollection.bnd"
 #include "Location.bnd"
 #include "Navigator.bnd"
+#include "DOMImplementation.bnd"
 
 /* events */
 
 #include "Event.bnd"
+#include "KeyboardEvent.bnd"
 
 init MutationEvent(struct dom_mutation_event *evt::evt);
 init UIEvent(struct dom_ui_event *evt::evt);
@@ -76,7 +79,6 @@ init MutationNameEvent(struct dom_mutation_name_event *evt::evt);
 init MouseWheelEvent(struct dom_mouse_wheel_event *evt::evt);
 init MouseMultiWheelEvent(struct dom_mouse_multi_wheel_event *evt::evt);
 init MouseEvent(struct dom_mouse_event *evt::evt);
-init KeyboardEvent(struct dom_keyboard_event *evt::evt);
 init DocumentEvent(struct dom_document_event *evt::evt);
 init CustomEvent(struct dom_custom_event *evt::evt);
 init CompositionEvent(struct dom_ui_event *evt::evt);
@@ -107,6 +109,7 @@ init TrackEvent(struct dom_event *evt::evt);
 #include "HTMLBodyElement.bnd"
 #include "HTMLButtonElement.bnd"
 #include "HTMLBRElement.bnd"
+#include "HTMLCanvasElement.bnd"
 #include "HTMLDivElement.bnd"
 #include "HTMLFontElement.bnd"
 #include "HTMLFormElement.bnd"
@@ -147,7 +150,6 @@ init TrackEvent(struct dom_event *evt::evt);
 
 init HTMLUnknownElement(struct dom_html_element *html_unknown_element::html_element);
 init HTMLDirectoryElement(struct dom_html_element *html_directory_element::html_element);
-init HTMLCanvasElement(struct dom_html_element *html_canvas_element::html_element);
 init HTMLTemplateElement(struct dom_html_element *html_template_element::html_element);
 init HTMLDialogElement(struct dom_html_element *html_dialog_element::html_element);
 init HTMLMenuItemElement(struct dom_html_element *html_menu_item_element::html_element);
@@ -198,4 +200,8 @@ init HTMLFormControlsCollection(struct dom_html_collection *coll);
 init HTMLOptionsCollection(struct dom_html_collection *coll);
 init HTMLPropertiesCollection(struct dom_html_collection *coll);
 
+/* Stuff to do with canvasses */
+
+#include "CanvasRenderingContext2D.bnd"
+#include "ImageData.bnd"
 

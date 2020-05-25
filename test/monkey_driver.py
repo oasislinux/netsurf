@@ -22,6 +22,7 @@ runs tests in monkey as defined in a yaml file
 
 # pylint: disable=locally-disabled, missing-docstring
 
+import os
 import sys
 import getopt
 import time
@@ -34,7 +35,6 @@ class DriverBrowser(Browser):
     def __init__(self, *args, **kwargs):
         super(DriverBrowser, self).__init__(*args, **kwargs)
         self.auth = []
-        self.cert = []
 
     def add_auth(self, url, realm, username, password):
         self.auth.append((url, realm, username, password))
@@ -86,46 +86,6 @@ class DriverBrowser(Browser):
             print("401: No candidate found, cancelling login box")
             logwin.destroy()
 
-    def add_cert(self, url):
-        # add sll certificate error exception
-        self.cert.append(url)
-
-    def remove_cert(self, url):
-        keep = []
-
-        def matches(first, second):
-            if first is None or second is None:
-                return True
-            return first == second
-
-        for iurl in self.cert:
-            if not matches(url, iurl):
-                keep.append(iurl)
-        self.cert = keep
-
-    def handle_ready_sslcert(self, cwin):
-
-        def matches(first, second):
-            if first is None or second is None:
-                return True
-            return first == second
-
-        candidates = []
-        for url in self.cert:
-            score = 0
-            if matches(url, cwin.url):
-                score += 1
-            if score > 0:
-                candidates.append((score, url))
-        if candidates:
-            candidates.sort()
-            (score, url) = candidates[-1]
-            print("SSLCert: Found candidate {} with score {}".format(url, score))
-            cwin.go()
-        else:
-            print("SSLCert: No candidate found, cancelling sslcert box")
-            cwin.destroy()
-
 
 def print_usage():
     print('Usage:')
@@ -174,7 +134,7 @@ def load_test_plan(path):
     plan = []
     with open(path, 'r') as stream:
         try:
-            plan = (yaml.load(stream))
+            plan = (yaml.load(stream, Loader=yaml.CSafeLoader))
         except Exception as exc:
             print(exc)
     return plan
@@ -211,18 +171,20 @@ def conds_met(ctx, conds):
         elif 'window' in cond.keys():
             status = cond['status']
             window = cond['window']
-            assert status == "complete"  # TODO: Add more status support?
+            assert status == "complete" or status == "loading"  # TODO: Add more status support?
             if window == "*all*":
-                # all windows must be not throbbing
+                # all windows must be complete, or any still loading
                 throbbing = False
                 for win in ctx['windows'].items():
                     if win[1].throbbing:
                         throbbing = True
-                if not throbbing:
+                # throbbing and want loading => true
+                # not throbbing and want complete => true
+                if (status == "loading") == throbbing:
                     return True
             else:
                 win = ctx['windows'][window]
-                if win.throbbing is False:
+                if win.throbbing == (status == "loading"):
                     return True
         else:
             raise AssertionError("Unknown condition: {}".format(repr(cond)))
@@ -232,14 +194,35 @@ def conds_met(ctx, conds):
 
 def run_test_step_action_launch(ctx, step):
     print(get_indent(ctx) + "Action: " + step["action"])
+
+    # ensure browser is not already launched
     assert ctx.get('browser') is None
     assert ctx.get('windows') is None
+
+    # build command line switches list
+    monkey_cmd = [ctx["monkey"]]
+    for option in step.get('launch-options', []):
+        monkey_cmd.append("--{}".format(option))
+    print(get_indent(ctx) + "        " + "Command line: " + repr(monkey_cmd))
+
+    # build command environment
+    monkey_env = os.environ.copy()
+    for envkey, envvalue in step.get('environment', {}).items():
+        monkey_env[envkey] = envvalue
+        print(get_indent(ctx) + "        " + envkey + "=" + envvalue)
+    if 'language' in step.keys():
+        monkey_env['LANGUAGE'] = step['language']
+
+    # create browser object
     ctx['browser'] = DriverBrowser(
-        monkey_cmd=[ctx["monkey"]],
+        monkey_cmd=monkey_cmd,
+        monkey_env=monkey_env,
         quiet=True,
         wrapper=ctx.get("wrapper"))
     assert_browser(ctx)
     ctx['windows'] = dict()
+
+    # set user options
     for option in step.get('options', []):
         print(get_indent(ctx) + "        " + option)
         ctx['browser'].pass_options(option)
@@ -265,8 +248,9 @@ def run_test_step_action_window_close(ctx, step):
     tag = step['window']
     assert ctx['windows'].get(tag) is not None
     win = ctx['windows'].pop(tag)
+    timeout = int(step.get('timeout', 30))
     win.kill()
-    win.wait_until_dead()
+    win.wait_until_dead(timeout=timeout)
     assert not win.alive
 
 
@@ -299,9 +283,18 @@ def run_test_step_action_stop(ctx, step):
     win.stop()
 
 
+def run_test_step_action_reload(ctx, step):
+    print(get_indent(ctx) + "Action: " + step["action"])
+    assert_browser(ctx)
+    tag = step['window']
+    win = ctx['windows'].get(tag)
+    assert win is not None
+    win.reload()
+
+
 def run_test_step_action_sleep_ms(ctx, step):
     print(get_indent(ctx) + "Action: " + step["action"])
-    conds = step['conditions']
+    conds = step.get('conditions', {})
     sleep_time = step['time']
     sleep = 0
     have_repeat = False
@@ -312,7 +305,7 @@ def run_test_step_action_sleep_ms(ctx, step):
         start = repeat["start"]
         have_repeat = True
     else:
-        sleep = time / 1000
+        sleep = sleep_time / 1000
         start = time.time()
 
     while True:
@@ -342,34 +335,102 @@ def run_test_step_action_repeat(ctx, step):
     print(get_indent(ctx) + "Action: " + step["action"])
     tag = step['tag']
     assert ctx['repeats'].get(tag) is None
+    # initialise the loop continue conditional
     ctx['repeats'][tag] = {"loop": True, }
 
-    if 'min' in step.keys():
-        ctx['repeats'][tag]["i"] = step["min"]
-    else:
-        ctx['repeats'][tag]["i"] = 0
-
-    if 'step' in step.keys():
-        ctx['repeats'][tag]["step"] = step["step"]
-    else:
-        ctx['repeats'][tag]["step"] = 1
-
     if 'values' in step.keys():
+        # value iterator
         ctx['repeats'][tag]['values'] = step["values"]
+        ctx['repeats'][tag]["max"] = len(step["values"])
+        ctx['repeats'][tag]["i"] = 0
+        ctx['repeats'][tag]["step"] = 1
     else:
+        # numeric iterator
         ctx['repeats'][tag]['values'] = None
+
+        if 'min' in step.keys():
+            ctx['repeats'][tag]["i"] = step["min"]
+        else:
+            ctx['repeats'][tag]["i"] = 0
+
+        if 'step' in step.keys():
+            ctx['repeats'][tag]["step"] = step["step"]
+        else:
+            ctx['repeats'][tag]["step"] = 1
+
+        if 'max' in step.keys():
+            ctx['repeats'][tag]["max"] = step["max"]
+        else:
+            ctx['repeats'][tag]["max"] = None
 
     while ctx['repeats'][tag]["loop"]:
         ctx['repeats'][tag]["start"] = time.time()
         ctx["depth"] += 1
+
+        # run through steps for this iteration
         for stp in step["steps"]:
             run_test_step(ctx, stp)
+
+        # increment iterator
         ctx['repeats'][tag]["i"] += ctx['repeats'][tag]["step"]
-        if ctx['repeats'][tag]['values'] is not None:
-            if ctx['repeats'][tag]["i"] >= len(ctx['repeats'][tag]['values']):
+
+        # check for end condition
+        if ctx['repeats'][tag]["max"] is not None:
+            if ctx['repeats'][tag]["i"] >= ctx['repeats'][tag]["max"]:
                 ctx['repeats'][tag]["loop"] = False
+
         ctx["depth"] -= 1
 
+
+def run_test_step_action_click(ctx, step):
+    print(get_indent(ctx) + "Action: " + step["action"])
+    assert_browser(ctx)
+    win = ctx['windows'][step['window']]
+    targets = step['target']
+    if type(targets) == dict:
+        targets = [targets]
+    button = step.get('button', 'left').upper()
+    kind = step.get('kind', 'single').upper()
+    all_text_list = []
+    bitmaps = []
+    for plot in win.redraw():
+        if plot[0] == 'TEXT':
+            all_text_list.append((int(plot[2]), int(plot[4]), " ".join(plot[6:])))
+        if plot[0] == 'BITMAP':
+            bitmaps.append((int(plot[2]), int(plot[4]), int(plot[6]), int(plot[8])))
+
+    x = None
+    y = None
+
+    for target in targets:
+        if 'bitmap' in target:
+            if x is not None:
+                assert False, "Found more than one thing to click on, oh well"
+            bmap = int(target['bitmap'])
+            assert bmap < 0 or bmap >= len(bitmaps)
+            x = bitmaps[bmap][0] + bitmaps[bmap][2] / 2
+            y = bitmaps[bmap][1] + bitmaps[bmap][3] / 2
+        elif 'text' in target:
+            if x is not None:
+                assert False, "Found more than one thing to click on, oh well"
+            text = target['text']
+            for textentry in all_text_list:
+                if text in textentry[2]:
+                    if x is not None:
+                        assert False, "Text {} found more than once".format(text)
+                    x = textentry[0] + 2
+                    y = textentry[1] + 2
+
+    # Now we want to click on the x/y coordinate given
+    print(get_indent(ctx) + "        Clicking at {}, {} (button={} kind={})".format(x, y, button, kind))
+    win.click(x, y, button, kind)
+
+
+def run_test_step_action_wait_loading(ctx, step):
+    print(get_indent(ctx) + "Action: " + step["action"])
+    assert_browser(ctx)
+    win = ctx['windows'][step['window']]
+    win.wait_start_loading()
 
 def run_test_step_action_plot_check(ctx, step):
     print(get_indent(ctx) + "Action: " + step["action"])
@@ -389,13 +450,13 @@ def run_test_step_action_plot_check(ctx, step):
     all_text = " ".join(all_text_list)
     for check in checks:
         if 'text-contains' in check.keys():
-            print("Check {} in {}".format(repr(check['text-contains']), repr(all_text)))
+            print("        Check {} in {}".format(repr(check['text-contains']), repr(all_text)))
             assert check['text-contains'] in all_text
         elif 'text-not-contains' in check.keys():
-            print("Check {} NOT in {}".format(repr(check['text-not-contains']), repr(all_text)))
+            print("        Check {} NOT in {}".format(repr(check['text-not-contains']), repr(all_text)))
             assert check['text-not-contains'] not in all_text
         elif 'bitmap-count' in check.keys():
-            print("Check bitmap count is {}".format(int(check['bitmap-count'])))
+            print("        Check bitmap count is {}".format(int(check['bitmap-count'])))
             assert len(bitmaps) == int(check['bitmap-count'])
         else:
             raise AssertionError("Unknown check: {}".format(repr(check)))
@@ -476,23 +537,6 @@ def run_test_step_action_remove_auth(ctx, step):
                         step.get("username"), step.get("password"))
 
 
-def run_test_step_action_add_cert(ctx, step):
-    print(get_indent(ctx) + "Action:" + step["action"])
-    assert_browser(ctx)
-    browser = ctx['browser']
-    browser.add_cert(step.get("url"))
-
-
-def run_test_step_action_remove_cert(ctx, step):
-
-    # pylint: disable=locally-disabled, invalid-name
-
-    print(get_indent(ctx) + "Action:" + step["action"])
-    assert_browser(ctx)
-    browser = ctx['browser']
-    browser.remove_cert(step.get("url"))
-
-
 def run_test_step_action_clear_log(ctx, step):
     print(get_indent(ctx) + "Action: " + step["action"])
     assert_browser(ctx)
@@ -528,11 +572,23 @@ def run_test_step_action_js_exec(ctx, step):
     win.js_exec(cmd)
 
 
+def run_test_step_action_page_info_state(ctx, step):
+    print(get_indent(ctx) + "Action: " + step["action"])
+    assert_browser(ctx)
+    tag = step['window']
+    win = ctx['windows'].get(tag)
+    assert win is not None
+    match = step['match']
+    assert win.page_info_state == match
+
+
 def run_test_step_action_quit(ctx, step):
     print(get_indent(ctx) + "Action: " + step["action"])
     assert_browser(ctx)
     browser = ctx.pop('browser')
     assert browser.quit_and_wait()
+    # clean up context as all windows have gone away after browser quit
+    ctx.pop('windows')
 
 
 STEP_HANDLERS = {
@@ -540,6 +596,7 @@ STEP_HANDLERS = {
     "window-new":    run_test_step_action_window_new,
     "window-close":  run_test_step_action_window_close,
     "navigate":      run_test_step_action_navigate,
+    "reload":        run_test_step_action_reload,
     "stop":          run_test_step_action_stop,
     "sleep-ms":      run_test_step_action_sleep_ms,
     "block":         run_test_step_action_block,
@@ -549,13 +606,15 @@ STEP_HANDLERS = {
     "timer-stop":    run_test_step_action_timer_stop,
     "timer-check":   run_test_step_action_timer_check,
     "plot-check":    run_test_step_action_plot_check,
+    "click":         run_test_step_action_click,
+    "wait-loading":  run_test_step_action_wait_loading,
     "add-auth":      run_test_step_action_add_auth,
     "remove-auth":   run_test_step_action_remove_auth,
-    "add-cert":      run_test_step_action_add_cert,
-    "remove-cert":   run_test_step_action_remove_cert,
     "clear-log":     run_test_step_action_clear_log,
     "wait-log":      run_test_step_action_wait_log,
     "js-exec":       run_test_step_action_js_exec,
+    "page-info-state":
+                     run_test_step_action_page_info_state,
     "quit":          run_test_step_action_quit,
 }
 

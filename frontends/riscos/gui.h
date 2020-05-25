@@ -44,7 +44,6 @@ struct tree;
 struct node;
 struct history;
 struct css_style;
-struct ssl_cert_info;
 struct nsurl;
 struct hlcache_handle;
 
@@ -93,8 +92,6 @@ struct gui_window {
 
 	char validation[12];	/**< Validation string for colours */
 
-	float scale;		/**< Browser window scale */
-
 	/** Options. */
 	struct {
 		bool buffer_animations;	/**< Use screen buffering for animations. */
@@ -133,15 +130,6 @@ void ro_gui_download_init(void);
 void ro_gui_download_datasave_ack(wimp_message *message);
 bool ro_gui_download_prequit(void);
 extern struct gui_download_table *riscos_download_table;
-
-/* in 401login.c */
-void ro_gui_401login_init(void);
-nserror gui_401login_open(struct nsurl *url, const char *realm,
-		const char *username, const char *password,
-		nserror (*cb)(const char *username,
-				const char *password,
-				void *pw),
-		void *cbpw);
 
 /* in schedule.c */
 extern bool sched_active;

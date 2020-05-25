@@ -33,6 +33,7 @@
 #include "netsurf/content.h"
 #include "content/llcache.h"
 #include "content/content_protected.h"
+#include "content/content_factory.h"
 #include "desktop/gui_internal.h"
 
 #include "image/nssprite.h"
@@ -117,12 +118,12 @@ static bool nssprite_convert(struct content *c)
 
 	nssprite->bitmap = guit->bitmap->create(sprite->width, sprite->height, BITMAP_NEW);
 	if (!nssprite->bitmap) {
-		content_broadcast_errorcode(c, NSERROR_NOMEM);
+		content_broadcast_error(c, NSERROR_NOMEM, NULL);
 		return false;
 	}
 	uint32_t* imagebuf = (uint32_t *)guit->bitmap->get_buffer(nssprite->bitmap);
 	if (!imagebuf) {
-		content_broadcast_errorcode(c, NSERROR_NOMEM);
+		content_broadcast_error(c, NSERROR_NOMEM, NULL);
 		return false;
 	}
 	unsigned char *spritebuf = (unsigned char *)sprite->image;
@@ -165,7 +166,7 @@ ro_sprite_error:
 	if (ctx != NULL) {
 		rosprite_destroy_mem_context(ctx);
 	}
-	content_broadcast_errorcode(c, NSERROR_SPRITE_ERROR);
+	content_broadcast_error(c, NSERROR_SPRITE_ERROR, NULL);
 
 	return false;
 }
@@ -257,6 +258,17 @@ static content_type nssprite_content_type(void)
 }
 
 
+static bool nssprite_content_is_opaque(struct content *c)
+{
+	nssprite_content *nssprite = (nssprite_content *) c;
+
+	if (nssprite->bitmap != NULL) {
+		return guit->bitmap->get_opaque(nssprite->bitmap);
+	}
+
+	return false;
+}
+
 static const content_handler nssprite_content_handler = {
 	.create = nssprite_create,
 	.data_complete = nssprite_convert,
@@ -265,6 +277,7 @@ static const content_handler nssprite_content_handler = {
 	.clone = nssprite_clone,
 	.get_internal = nssprite_get_internal,
 	.type = nssprite_content_type,
+	.is_opaque = nssprite_content_is_opaque,
 	.no_share = false,
 };
 

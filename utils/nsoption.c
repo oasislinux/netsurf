@@ -385,17 +385,20 @@ nsoption_output_value_html(struct nsoption_s *option,
 		break;
 
 	case OPTION_COLOUR:
-		rgbcolour = (((0x000000FF & option->value.c) << 16) |
-			     ((0x0000FF00 & option->value.c) << 0) |
-			     ((0x00FF0000 & option->value.c) >> 16));
+		rgbcolour = colour_rb_swap(option->value.c);
 		slen = snprintf(string + pos,
 				size - pos,
+				"<span style=\"font-family:Monospace;\">"
+					"#%06X"
+				"</span> "
 				"<span style=\"background-color: #%06x; "
-				"color: #%06x; "
-				"font-family:Monospace; \">#%06X</span>",
+					"border: 1px solid #%06x; "
+					"display: inline-block; "
+					"width: 1em; height: 1em;\">"
+				"</span>",
 				rgbcolour,
-				colour_to_bw_furthest(rgbcolour),
-				rgbcolour);
+				rgbcolour,
+				colour_to_bw_furthest(rgbcolour));
 		break;
 
 	case OPTION_STRING:

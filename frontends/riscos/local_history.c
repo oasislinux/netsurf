@@ -289,6 +289,7 @@ static nserror
 ro_local_history_init(struct browser_window *bw,
 		      struct ro_local_history_window **win_out)
 {
+	os_error *error;
 	struct ro_local_history_window *ncwin;
 	nserror res;
 
@@ -306,7 +307,15 @@ ro_local_history_init(struct browser_window *bw,
 	}
 
 	/* create window from template */
-	ncwin->core.wh = wimp_create_window(dialog_local_history_template);
+	error = xwimp_create_window(dialog_local_history_template,
+				    &ncwin->core.wh);
+	if (error) {
+		NSLOG(netsurf, INFO, "xwimp_create_window: 0x%x: %s",
+		      error->errnum, error->errmess);
+		ro_warn_user("WimpError", error->errmess);
+		free(ncwin);
+		return NSERROR_NOMEM;
+	}
 
 	/* initialise callbacks */
 	ncwin->core.draw = ro_local_history_draw;
@@ -393,6 +402,17 @@ ro_local_history_open(struct ro_local_history_window *lhw, wimp_w parent)
 	}
 
 	ro_gui_dialog_open_persistent(parent, lhw->core.wh, true);
+
+	/* Give the window focus. */
+	error = xwimp_set_caret_position(lhw->core.wh, -1, 0, 0, -1, 0);
+	if (error) {
+		NSLOG(netsurf, INFO,
+		      "xwimp_set_caret_position: 0x%x : %s",
+		      error->errnum,
+		      error->errmess);
+	}
+
+	local_history_scroll_to_cursor(lhw->session);
 
 	return NSERROR_OK;
 }

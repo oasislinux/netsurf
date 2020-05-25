@@ -35,7 +35,9 @@
 #include "utils/utils.h"
 #include "netsurf/plotters.h"
 #include "netsurf/content.h"
+#include "content/content.h"
 #include "content/content_protected.h"
+#include "content/content_factory.h"
 #include "content/llcache.h"
 
 #include "riscos/content-handlers/draw.h"
@@ -128,7 +130,8 @@ bool draw_convert(struct content *c)
 	if (error) {
 		NSLOG(netsurf, INFO, "xdrawfile_bbox: 0x%x: %s",
 		      error->errnum, error->errmess);
-		msg_data.error = error->errmess;
+		msg_data.errordata.errorcode = NSERROR_UNKNOWN;
+		msg_data.errordata.errormsg = error->errmess;
 		content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 		return false;
 	}

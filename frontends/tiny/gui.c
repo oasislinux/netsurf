@@ -54,12 +54,6 @@ die(const char *error)
 	exit(1);
 }
 
-static nserror
-tiny_warning(const char *warning, const char *detail)
-{
-	return NSERROR_OK;
-}
-
 static void
 tiny_quit(void)
 {
@@ -75,12 +69,11 @@ tiny_launch_url(struct nsurl *url)
 
 static struct gui_misc_table tiny_misc_table = {
 	.schedule = tiny_schedule,
-	.warning = tiny_warning,
 	.quit = tiny_quit,
 	.launch_url = tiny_launch_url,
-	/* cert_verify */
 	/* login */
 	/* pdf_password */
+	/* present_cookies */
 };
 
 static nserror

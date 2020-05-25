@@ -35,7 +35,9 @@ typedef enum {
 	TOOLBAR_URL_DRAG_URL,
 	TOOLBAR_URL_DRAG_FAVICON,
 	TOOLBAR_URL_SELECT_HOTLIST,
-	TOOLBAR_URL_ADJUST_HOTLIST
+	TOOLBAR_URL_ADJUST_HOTLIST,
+	TOOLBAR_URL_SELECT_PGINFO,
+	TOOLBAR_URL_ADJUST_PGINFO
 } url_bar_action;
 
 struct url_bar;
@@ -323,8 +325,17 @@ bool ro_gui_url_bar_set_content_favicon(struct url_bar *url_bar,
  * \param *url_bar		The URL bar to update.
  * \return			true if successful; else false.
  */
-
 bool ro_gui_url_bar_update_urlsuggest(struct url_bar *url_bar);
+
+
+/**
+ * Update the page info icon
+ *
+ * \param url_bar The URL bar to update.
+ * \return true if successful; else false.
+ */
+bool ro_gui_url_bar_page_info_change(struct url_bar *url_bar);
+
 
 #endif
 

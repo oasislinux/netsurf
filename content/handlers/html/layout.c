@@ -47,10 +47,12 @@
 #include "utils/talloc.h"
 #include "utils/utils.h"
 #include "utils/nsoption.h"
+#include "utils/nsurl.h"
 #include "netsurf/inttypes.h"
 #include "netsurf/content.h"
 #include "netsurf/browser_window.h"
 #include "netsurf/layout.h"
+#include "content/content.h"
 #include "content/content_protected.h"
 #include "css/utils.h"
 #include "desktop/scrollbar.h"
@@ -58,8 +60,9 @@
 
 #include "html/html.h"
 #include "html/html_save.h"
-#include "html/html_internal.h"
+#include "html/private.h"
 #include "html/box.h"
+#include "html/box_inspect.h"
 #include "html/font.h"
 #include "html/form_internal.h"
 #include "html/layout.h"
@@ -219,6 +222,11 @@ layout_get_object_dimensions(struct box *box,
 		 * and ratio of intrinsic dimensions */
 		int intrinsic_width = content_get_width(box->object);
 		int intrinsic_height = content_get_height(box->object);
+
+		if (min_width >  0 && min_width > *width)
+			*width = min_width;
+		if (max_width >= 0 && max_width < *width)
+			*width = max_width;
 
 		if (intrinsic_width != 0)
 			*height = (*width * intrinsic_height) /

@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Vincent Sanders <vince@netsurf-browser.org>
+ * Copyright 2019 Vincent Sanders <vince@netsurf-browser.org>
  *
  * This file is part of NetSurf, http://www.netsurf-browser.org/
  *
@@ -20,6 +20,6 @@
 
 #include "desktop/version.h"
 
-const char * const netsurf_version = "3.9 (17th July 2019)";
+const char * const netsurf_version = "3.10 (24th May 2020)";
 const int netsurf_version_major = 3;
-const int netsurf_version_minor = 9;
+const int netsurf_version_minor = 10;

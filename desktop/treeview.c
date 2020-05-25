@@ -22,13 +22,15 @@
  * Treeview handling implementation.
  */
 
+#include "utils/config.h"
+
 #include <string.h>
 
 #include "utils/utils.h"
 #include "utils/log.h"
 #include "utils/nsurl.h"
+#include "utils/nscolour.h"
 #include "utils/nsoption.h"
-#include "utils/config.h"
 #include "netsurf/bitmap.h"
 #include "netsurf/content.h"
 #include "netsurf/plotters.h"
@@ -39,11 +41,12 @@
 #include "content/hlcache.h"
 #include "css/utils.h"
 
-#include "desktop/system_colour.h"
 #include "desktop/knockout.h"
 #include "desktop/textarea.h"
 #include "desktop/treeview.h"
+#include "desktop/cw_helper.h"
 #include "desktop/gui_internal.h"
+#include "desktop/system_colour.h"
 
 /**
  * The maximum horizontal size a treeview can possibly be.
@@ -358,6 +361,26 @@ static inline void treeview__cw_invalidate_area(
 
 
 /**
+ * Corewindow callback wrapper: Request a full redraw of the window
+ *
+ * \param[in] tree The treeview to request redraw on.
+ */
+static inline void treeview__cw_full_redraw(
+		const struct treeview *tree)
+{
+	if (tree->cw_t != NULL) {
+		static const struct rect r = {
+			.x0 = 0,
+			.y0 = 0,
+			.x1 = REDRAW_MAX,
+			.y1 = REDRAW_MAX,
+		};
+		tree->cw_t->invalidate(tree->cw_h, &r);
+	}
+}
+
+
+/**
  * Get height used by treeview's search bar (or 0 if not present).
  *
  * \param tree    Treeview object to check.
@@ -404,9 +427,7 @@ static inline void treeview__cw_scroll_top(
 		.y1 = tree_g.line_height,
 	};
 
-	if (tree->cw_t != NULL) {
-		tree->cw_t->scroll_visible(tree->cw_h, &r);
-	}
+	cw_helper_scroll_visible(tree->cw_t, tree->cw_h, &r);
 }
 
 
@@ -561,6 +582,30 @@ static int treeview_node_y(
 	}
 
 	return y;
+}
+
+
+/**
+ * Corewindow callback_wrapper: Scroll to make node visible
+ *
+ * \param[in] tree  The treeview to scroll.
+ * \param[in] node  The treeview node to scroll to visibility.
+ */
+static inline void treeview__cw_scroll_to_node(
+		const struct treeview *tree,
+		const struct treeview_node *node)
+{
+	struct rect r = {
+		.x0 = 0,
+		.y0 = treeview_node_y(tree, node),
+		.x1 = 1,
+		.y1 = ((node->type == TREE_NODE_ENTRY) ?
+		       node->height : tree_g.line_height),
+	};
+
+	r.y1 += r.y0; /* Apply the Y offset to the second Y coordinate */
+
+	cw_helper_scroll_visible(tree->cw_t, tree->cw_h, &r);
 }
 
 
@@ -888,6 +933,12 @@ static void treeview__search_cancel(treeview *tree, bool drop_focus)
 	tree->search.search = false;
 	if (tree->search.active == false) {
 		return;
+	}
+
+	if (textarea_get_text(tree->search.textarea, NULL, 0) == 1) {
+		// If there's no text in the search box, we drop focus on a
+		// cancel.  Note '1' because it includes the trailing \0
+		drop_focus = true;
 	}
 
 	if (drop_focus) {
@@ -1965,7 +2016,7 @@ treeview_create(treeview **tree,
 
 	(*tree)->fields = malloc(sizeof(struct treeview_field) * n_fields);
 	if ((*tree)->fields == NULL) {
-		free(tree);
+		free(*tree);
 		return NSERROR_NOMEM;
 	}
 
@@ -2019,9 +2070,9 @@ treeview_create(treeview **tree,
 	if (flags & TREEVIEW_SEARCHABLE) {
 		(*tree)->search.textarea = treeview__create_textarea(
 				*tree, 600, tree_g.line_height,
-				plot_style_even.text.background,
-				plot_style_even.text.background,
-				plot_style_even.text.foreground,
+				nscolours[NSCOLOUR_TEXT_INPUT_BG],
+				nscolours[NSCOLOUR_TEXT_INPUT_BG],
+				nscolours[NSCOLOUR_TEXT_INPUT_FG],
 				plot_style_odd.text,
 				treeview_textarea_search_callback);
 		if ((*tree)->search.textarea == NULL) {
@@ -2118,7 +2169,8 @@ treeview_node_expand_internal(treeview *tree, treeview_node *node)
 {
 	treeview_node *child;
 	struct treeview_node_entry *e;
-	int additional_height = 0;
+	int additional_height_folders = 0;
+	int additional_height_entries = 0;
 	int i;
 
 	assert(tree != NULL);
@@ -2146,7 +2198,7 @@ treeview_node_expand_internal(treeview *tree, treeview_node *node)
 						    &(child->text.width));
 			}
 
-			additional_height += child->height;
+			additional_height_folders += child->height;
 
 			child = child->next_sib;
 		} while (child != NULL);
@@ -2168,7 +2220,7 @@ treeview_node_expand_internal(treeview *tree, treeview_node *node)
 			}
 
 			/* Add height for field */
-			additional_height += tree_g.line_height;
+			additional_height_entries += tree_g.line_height;
 		}
 
 		break;
@@ -2187,17 +2239,18 @@ treeview_node_expand_internal(treeview *tree, treeview_node *node)
 	for (struct treeview_node *n = node;
 			(n != NULL) && (n->flags & TV_NFLAGS_EXPANDED);
 			n = n->parent) {
-		n->height += additional_height;
+		n->height += additional_height_entries +
+				additional_height_folders;
 	}
 
 	if (tree->search.search &&
 			node->type == TREE_NODE_ENTRY &&
 			node->flags & TV_NFLAGS_MATCHED) {
-		tree->search.height += additional_height;
+		tree->search.height += additional_height_entries;
 	}
 
 	/* Inform front end of change in dimensions */
-	if (additional_height != 0) {
+	if (additional_height_entries + additional_height_folders != 0) {
 		treeview__cw_update_size(tree, -1,
 				treeview__get_display_height(tree));
 	}
@@ -2243,7 +2296,8 @@ struct treeview_contract_data {
 static nserror treeview_node_contract_cb(treeview_node *n, void *ctx, bool *end)
 {
 	struct treeview_contract_data *data = ctx;
-	int h_reduction;
+	int h_reduction_folder = 0;
+	int h_reduction_entry = 0;
 
 	assert(n != NULL);
 	assert(n->type != TREE_NODE_ROOT);
@@ -2256,17 +2310,30 @@ static nserror treeview_node_contract_cb(treeview_node *n, void *ctx, bool *end)
 		return NSERROR_OK;
 	}
 
-	h_reduction = n->height - tree_g.line_height;
 
-	assert(h_reduction >= 0);
+	switch (n->type) {
+	case TREE_NODE_FOLDER:
+		h_reduction_folder = n->height - tree_g.line_height;
+		break;
+
+	case TREE_NODE_ENTRY:
+		h_reduction_entry = n->height - tree_g.line_height;
+		break;
+
+	default:
+		break;
+	}
+
+
+	assert(h_reduction_folder + h_reduction_entry >= 0);
 	for (struct treeview_node *node = n;
 			(node != NULL) && (node->flags & TV_NFLAGS_EXPANDED);
 			node = node->parent) {
-		node->height -= h_reduction;
+		node->height -= h_reduction_folder + h_reduction_entry;
 	}
 
 	if (data->tree->search.search) {
-		data->tree->search.height -= h_reduction;
+		data->tree->search.height -= h_reduction_entry;
 	}
 
 	n->flags ^= TV_NFLAGS_EXPANDED;
@@ -2472,7 +2539,7 @@ static void treeview_redraw_tree(
 		const int x,
 		const int y,
 		int *render_y_in_out,
-		struct rect *r,
+		const struct rect *r,
 		struct content_redraw_data *data,
 		const struct redraw_context *ctx)
 {
@@ -2691,7 +2758,7 @@ static void treeview_redraw_search(
 		const int x,
 		const int y,
 		int *render_y_in_out,
-		struct rect *r,
+		const struct rect *r,
 		struct content_redraw_data *data,
 		const struct redraw_context *ctx)
 {
@@ -3805,12 +3872,15 @@ treeview_keyboard_navigation(treeview *tree, uint32_t key, struct rect *rect)
 	int search_height = treeview__get_search_height(tree);
 	int h = treeview__get_display_height(tree) + search_height;
 	bool redraw = false;
+	struct treeview_node *scroll_to_node = NULL;
 
 	/* Fill out the nav. state struct, by examining the current selection
 	 * state */
 	treeview_walk_internal(tree, tree->root,
 			TREEVIEW_WALK_MODE_DISPLAY, NULL,
 			treeview_node_nav_cb, &ns);
+
+	scroll_to_node = ns.curr;
 
 	if (tree->search.search == false) {
 		if (ns.next == NULL)
@@ -3832,10 +3902,12 @@ treeview_keyboard_navigation(treeview *tree, uint32_t key, struct rect *rect)
 		    ns.curr->parent->type != TREE_NODE_ROOT) {
 			/* Step to parent */
 			ns.curr->parent->flags |= TV_NFLAGS_SELECTED;
+			scroll_to_node = ns.curr->parent;
 
 		} else if (ns.curr != NULL && tree->root->children != NULL) {
 			/* Select first node in tree */
 			tree->root->children->flags |= TV_NFLAGS_SELECTED;
+			scroll_to_node = tree->root->children;
 		}
 		break;
 
@@ -3848,6 +3920,7 @@ treeview_keyboard_navigation(treeview *tree, uint32_t key, struct rect *rect)
 					/* Step to first child */
 					ns.curr->children->flags |=
 						TV_NFLAGS_SELECTED;
+					scroll_to_node = ns.curr->children;
 				} else {
 					/* Retain current node selection */
 					ns.curr->flags |= TV_NFLAGS_SELECTED;
@@ -3869,6 +3942,7 @@ treeview_keyboard_navigation(treeview *tree, uint32_t key, struct rect *rect)
 		if (ns.prev != NULL) {
 			/* Step to previous node */
 			ns.prev->flags |= TV_NFLAGS_SELECTED;
+			scroll_to_node = ns.prev;
 		}
 		break;
 
@@ -3876,12 +3950,15 @@ treeview_keyboard_navigation(treeview *tree, uint32_t key, struct rect *rect)
 		if (ns.next != NULL) {
 			/* Step to next node */
 			ns.next->flags |= TV_NFLAGS_SELECTED;
+			scroll_to_node = ns.next;
 		}
 		break;
 
 	default:
 		break;
 	}
+
+	treeview__cw_scroll_to_node(tree, scroll_to_node);
 
 	/* TODO: Deal with redraw area properly */
 	rect->x0 = 0;
@@ -4633,14 +4710,22 @@ treeview_mouse_action(treeview *tree, browser_mouse_state mouse, int x, int y)
 		textarea_mouse_action(tree->edit.textarea, mouse,
 				      x - tree->edit.x, y - tree->edit.y);
 		return;
-	} else if (tree->drag.type == TV_DRAG_SEARCH ||
-			(y < search_height &&
-			 tree->drag.type == TV_DRAG_NONE)) {
+	} else if (tree->drag.type == TV_DRAG_SEARCH) {
 		if (tree->search.active == false) {
 			tree->search.active = true;
 			if (treeview_clear_selection(tree, &r)) {
 				treeview__cw_invalidate_area(tree, &r);
 			}
+		}
+		textarea_mouse_action(tree->search.textarea, mouse,
+				x - tree_g.window_padding - tree_g.icon_size,
+				y);
+		return;
+	} else if (mouse & (BROWSER_MOUSE_PRESS_1 | BROWSER_MOUSE_PRESS_2) &&
+		   y < search_height && tree->search.active == false) {
+		tree->search.active = true;
+		if (treeview_clear_selection(tree, &r)) {
+			treeview__cw_invalidate_area(tree, &r);
 		}
 		textarea_mouse_action(tree->search.textarea, mouse,
 				x - tree_g.window_padding - tree_g.icon_size,
@@ -4804,6 +4889,31 @@ int treeview_get_height(treeview *tree)
 	return height + search_height;
 }
 
+/* Exported interface, documented in treeview.h */
+nserror treeview_set_search_string(
+		treeview *tree,
+		const char *string)
+{
+	if (!(tree->flags & TREEVIEW_SEARCHABLE)) {
+		return NSERROR_BAD_PARAMETER;
+	}
+
+	if (string == NULL || strlen(string) == 0) {
+		tree->search.active = false;
+		tree->search.search = false;
+		return treeview__search(tree, "", 0);
+	}
+
+	tree->search.active = true;
+	tree->search.search = true;
+	if (!textarea_set_text(tree->search.textarea, string)) {
+		return NSERROR_UNKNOWN;
+	}
+
+	treeview__cw_full_redraw(tree);
+
+	return NSERROR_OK;
+}
 
 /**
  * Initialise the plot styles from CSS system colour values.
@@ -4813,75 +4923,45 @@ int treeview_get_height(treeview *tree)
  */
 static nserror treeview_init_plot_styles(int font_pt_size)
 {
-	nserror res;
-
 	/* Background colour */
 	plot_style_even.bg.stroke_type = PLOT_OP_TYPE_NONE;
 	plot_style_even.bg.stroke_width = 0;
 	plot_style_even.bg.stroke_colour = 0;
 	plot_style_even.bg.fill_type = PLOT_OP_TYPE_SOLID;
-	res = ns_system_colour_char("Window", &plot_style_even.bg.fill_colour);
-	if (res != NSERROR_OK) {
-		return res;
-	}
+	plot_style_even.bg.fill_colour = nscolours[NSCOLOUR_WIN_EVEN_BG];
 
 	/* Text colour */
 	plot_style_even.text.family = PLOT_FONT_FAMILY_SANS_SERIF;
 	plot_style_even.text.size = font_pt_size;
 	plot_style_even.text.weight = 400;
 	plot_style_even.text.flags = FONTF_NONE;
-	res = ns_system_colour_char("WindowText", &plot_style_even.text.foreground);
-	if (res != NSERROR_OK) {
-		return res;
-	}
-	res = ns_system_colour_char("Window", &plot_style_even.text.background);
-	if (res != NSERROR_OK) {
-		return res;
-	}
+	plot_style_even.text.foreground = nscolours[NSCOLOUR_WIN_EVEN_FG];
+	plot_style_even.text.background = nscolours[NSCOLOUR_WIN_EVEN_BG];
 
 	/* Entry field text colour */
 	plot_style_even.itext = plot_style_even.text;
-	plot_style_even.itext.foreground = mix_colour(
-		plot_style_even.text.foreground,
-		plot_style_even.text.background,
-		255 * 10 / 16);
+	plot_style_even.itext.foreground = nscolours[NSCOLOUR_WIN_EVEN_FG_FADED];
 
 	/* Selected background colour */
 	plot_style_even.sbg = plot_style_even.bg;
-	res = ns_system_colour_char("Highlight", &plot_style_even.sbg.fill_colour);
-	if (res != NSERROR_OK) {
-		return res;
-	}
+	plot_style_even.sbg.fill_colour = nscolours[NSCOLOUR_SEL_BG];
 
 	/* Selected text colour */
 	plot_style_even.stext = plot_style_even.text;
-	res = ns_system_colour_char("HighlightText", &plot_style_even.stext.foreground);
-	if (res != NSERROR_OK) {
-		return res;
-	}
-	res = ns_system_colour_char("Highlight", &plot_style_even.stext.background);
-	if (res != NSERROR_OK) {
-		return res;
-	}
+	plot_style_even.stext.foreground = nscolours[NSCOLOUR_SEL_FG];
+	plot_style_even.stext.background = nscolours[NSCOLOUR_SEL_BG];
 
 	/* Selected entry field text colour */
 	plot_style_even.sitext = plot_style_even.stext;
-	plot_style_even.sitext.foreground = mix_colour(
-		plot_style_even.stext.foreground,
-		plot_style_even.stext.background,
-		255 * 25 / 32);
+	plot_style_even.sitext.foreground = nscolours[NSCOLOUR_SEL_FG_SUBTLE];
 
 	/* Odd numbered node styles */
 	plot_style_odd.bg = plot_style_even.bg;
-	plot_style_odd.bg.fill_colour = mix_colour(
-		plot_style_even.bg.fill_colour,
-		plot_style_even.text.foreground, 255 * 15 / 16);
+	plot_style_odd.bg.fill_colour = nscolours[NSCOLOUR_WIN_ODD_BG];
 	plot_style_odd.text = plot_style_even.text;
 	plot_style_odd.text.background = plot_style_odd.bg.fill_colour;
 	plot_style_odd.itext = plot_style_odd.text;
-	plot_style_odd.itext.foreground = mix_colour(
-		plot_style_odd.text.foreground,
-		plot_style_odd.text.background, 255 * 10 / 16);
+	plot_style_odd.itext.foreground = nscolours[NSCOLOUR_WIN_EVEN_FG_FADED];
 
 	plot_style_odd.sbg = plot_style_even.sbg;
 	plot_style_odd.stext = plot_style_even.stext;

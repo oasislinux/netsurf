@@ -36,7 +36,9 @@
 #include "netsurf/plotters.h"
 #include "netsurf/bitmap.h"
 #include "content/llcache.h"
+#include "content/content.h"
 #include "content/content_protected.h"
+#include "content/content_factory.h"
 #include "content/handlers/image/image_cache.h"
 
 #include "amiga/bitmap.h"
@@ -186,7 +188,8 @@ static struct bitmap *amiga_dt_picture_cache_convert(struct content *c)
 	{
 		bitmap = amiga_bitmap_create(c->width, c->height, BITMAP_NEW);
 		if (!bitmap) {
-			msg_data.error = messages_get("NoMemory");
+			msg_data.errordata.errorcode = NSERROR_NOMEM;
+			msg_data.errordata.errormsg = messages_get("NoMemory");
 			content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 			return NULL;
 		}

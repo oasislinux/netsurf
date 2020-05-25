@@ -32,15 +32,57 @@ import socket
 import subprocess
 import time
 import errno
+import sys
+
+class StderrEcho(asyncore.dispatcher):
+    def __init__(self, sockend):
+        asyncore.dispatcher.__init__(self, sock=sockend)
+        self.incoming = b""
+
+    def handle_connect(self):
+        pass
+
+    def handle_close(self):
+        # the pipe to the monkey process has closed
+        self.close()
+
+    def handle_read(self):
+        try:
+            got = self.recv(8192)
+            if not got:
+                return
+        except socket.error as error:
+            if error.errno == errno.EAGAIN or error.errno == errno.EWOULDBLOCK:
+                return
+            else:
+                raise
+
+        self.incoming += got
+        if b"\n" in self.incoming:
+            lines = self.incoming.split(b"\n")
+            self.incoming = lines.pop()
+            for line in lines:
+                try:
+                    line = line.decode('utf-8')
+                except UnicodeDecodeError:
+                    print("WARNING: Unicode decode error")
+                    line = line.decode('utf-8', 'replace')
+
+                sys.stderr.write("{}\n".format(line))
+
 
 class MonkeyFarmer(asyncore.dispatcher):
 
     # pylint: disable=locally-disabled, too-many-instance-attributes
 
-    def __init__(self, monkey_cmd, online, quiet=False, *, wrapper=None):
+    def __init__(self, monkey_cmd, monkey_env, online, quiet=False, *, wrapper=None):
         (mine, monkeys) = socket.socketpair()
 
         asyncore.dispatcher.__init__(self, sock=mine)
+
+        (mine2, monkeyserr) = socket.socketpair()
+
+        self._errwrapper = StderrEcho(mine2)
 
         if wrapper is not None:
             new_cmd = list(wrapper)
@@ -49,11 +91,14 @@ class MonkeyFarmer(asyncore.dispatcher):
 
         self.monkey = subprocess.Popen(
             monkey_cmd,
+            env=monkey_env,
             stdin=monkeys,
             stdout=monkeys,
-            close_fds=[mine])
+            stderr=monkeyserr,
+            close_fds=[mine, mine2])
 
         monkeys.close()
+        monkeyserr.close()
 
         self.buffer = b""
         self.incoming = b""
@@ -81,8 +126,11 @@ class MonkeyFarmer(asyncore.dispatcher):
                 if self.monkey.poll() is None:
                     self.monkey.terminate()
                     self.monkey.wait()
-                self.lines.insert(0, "GENERIC EXIT {}".format(
+                print("Handling an exit {}".format(self.monkey.returncode))
+                print("The following are present in the queue: {}".format(self.lines))
+                self.lines.append("GENERIC EXIT {}".format(
                     self.monkey.returncode).encode('utf-8'))
+                print("The queue is now: {}".format(self.lines))
                 return
         except socket.error as error:
             if error.errno == errno.EAGAIN or error.errno == errno.EWOULDBLOCK:
@@ -94,7 +142,7 @@ class MonkeyFarmer(asyncore.dispatcher):
         if b"\n" in self.incoming:
             lines = self.incoming.split(b"\n")
             self.incoming = lines.pop()
-            self.lines = lines
+            self.lines.extend(lines)
 
     def writable(self):
         return len(self.buffer) > 0
@@ -112,7 +160,11 @@ class MonkeyFarmer(asyncore.dispatcher):
         self.buffer += cmd.encode('utf-8')
 
     def monkey_says(self, line):
-        line = line.decode('utf-8')
+        try:
+            line = line.decode('utf-8')
+        except UnicodeDecodeError:
+            print("WARNING: Unicode decode error")
+            line = line.decode('utf-8', 'replace')
         if not self.quiet:
             print("<<< {}".format(line))
         self.discussion.append(("<", line))
@@ -145,25 +197,25 @@ class MonkeyFarmer(asyncore.dispatcher):
                 asyncore.loop(timeout=next_event - now, count=1)
             else:
                 asyncore.loop(count=1)
-            if len(self.lines) > 0:
+            while len(self.lines) > 0:
                 self.monkey_says(self.lines.pop(0))
-            if once:
-                break
+                if once or self.deadmonkey:
+                    return
 
 
 class Browser:
 
     # pylint: disable=locally-disabled, too-many-instance-attributes, dangerous-default-value, invalid-name
 
-    def __init__(self, monkey_cmd=["./nsmonkey"], quiet=False, *, wrapper=None):
+    def __init__(self, monkey_cmd=["./nsmonkey"], monkey_env=None, quiet=False, *, wrapper=None):
         self.farmer = MonkeyFarmer(
             monkey_cmd=monkey_cmd,
+            monkey_env=monkey_env,
             online=self.on_monkey_line,
             quiet=quiet,
             wrapper=wrapper)
         self.windows = {}
         self.logins = {}
-        self.sslcerts = {}
         self.current_draw_target = None
         self.started = False
         self.stopped = False
@@ -235,18 +287,6 @@ class Browser:
                 if win.alive and win.ready:
                     self.handle_ready_login(win)
 
-    def handle_SSLCERT(self, action, _lwin, winid, *args):
-        if action == "VERIFY":
-            new_win = SSLCertWindow(self, winid, *args)
-            self.sslcerts[winid] = new_win
-            self.handle_ready_sslcert(new_win)
-        else:
-            win = self.sslcerts.get(winid, None)
-            if win is None:
-                print("    Unknown ssl cert window id {}".format(winid))
-            else:
-                win.handle(action, *args)
-
     def handle_PLOT(self, *args):
         if self.current_draw_target is not None:
             self.current_draw_target.handle_plot(*args)
@@ -268,44 +308,6 @@ class Browser:
 
         # Override this method to do useful stuff
         lwin.destroy()
-
-    def handle_ready_sslcert(self, cwin):
-
-        # pylint: disable=locally-disabled, no-self-use
-
-        # Override this method to do useful stuff
-        cwin.destroy()
-
-
-class SSLCertWindow:
-
-    # pylint: disable=locally-disabled, invalid-name
-
-    def __init__(self, browser, winid, _url, *url):
-        self.alive = True
-        self.browser = browser
-        self.winid = winid
-        self.url = " ".join(url)
-
-    def handle(self, action, _str="STR"):
-        if action == "DESTROY":
-            self.alive = False
-        else:
-            raise AssertionError("Unknown action {} for sslcert window".format(action))
-
-    def _wait_dead(self):
-        while self.alive:
-            self.browser.farmer.loop(once=True)
-
-    def go(self):
-        assert self.alive
-        self.browser.farmer.tell_monkey("SSLCERT GO {}".format(self.winid))
-        self._wait_dead()
-
-    def destroy(self):
-        assert self.alive
-        self.browser.farmer.tell_monkey("SSLCERT DESTROY {}".format(self.winid))
-        self._wait_dead()
 
 
 class LoginWindow:
@@ -403,6 +405,7 @@ class BrowserWindow:
         self.plotted = []
         self.plotting = False
         self.log_entries = []
+        self.page_info_state = "UNKNOWN"
 
     def kill(self):
         self.browser.farmer.tell_monkey("WINDOW DESTROY %s" % self.winid)
@@ -412,6 +415,10 @@ class BrowserWindow:
         while self.alive:
             self.browser.farmer.loop(once=True)
             if (time.time() - now) > timeout:
+                print("*** Timed out waiting for window to be destroyed")
+                print("*** URL was: {}".format(self.url))
+                print("*** Title was: {}".format(self.title))
+                print("*** Status was: {}".format(self.status))
                 break
 
     def go(self, url, referer=None):
@@ -426,8 +433,13 @@ class BrowserWindow:
     def stop(self):
         self.browser.farmer.tell_monkey("WINDOW STOP %s" % (self.winid))
 
-    def reload(self):
-        self.browser.farmer.tell_monkey("WINDOW RELOAD %s" % self.winid)
+    def reload(self, all=False):
+        all = " ALL" if all else ""
+        self.browser.farmer.tell_monkey("WINDOW RELOAD %s%s" % (self.winid, all))
+        self.wait_start_loading()
+
+    def click(self, x, y, button="LEFT", kind="SINGLE"):
+        self.browser.farmer.tell_monkey("WINDOW CLICK WIN %s X %s Y %s BUTTON %s KIND %s" % (self.winid, x, y, button, kind))
 
     def js_exec(self, src):
         self.browser.farmer.tell_monkey("WINDOW EXEC WIN %s %s" % (self.winid, src))
@@ -510,6 +522,9 @@ class BrowserWindow:
 
     def handle_window_CONSOLE_LOG(self, _src, src, folding, level, *msg):
         self.log_entries.append((src, folding == "FOLDABLE", level, " ".join(msg)))
+
+    def handle_window_PAGE_STATUS(self, _status, status):
+        self.page_info_state = status
 
     def load_page(self, url=None, referer=None):
         if url is not None:
@@ -613,9 +628,6 @@ def farmer_test():
             lwin.send_username("foo")
             lwin.send_password("bar")
             lwin.go()
-
-        def handle_ready_sslcert(self, cwin):
-            cwin.destroy()
 
     fbbrowser = FooBarLogin(quiet=True)
     win = fbbrowser.new_window()

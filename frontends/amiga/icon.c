@@ -45,7 +45,10 @@
 #include "netsurf/plotters.h"
 #include "netsurf/bitmap.h"
 #include "netsurf/content.h"
+#include "content/content.h"
 #include "content/content_protected.h"
+#include "content/content_factory.h"
+#include "desktop/gui_internal.h"
 
 #include "amiga/os3support.h"
 #include "amiga/bitmap.h"
@@ -85,6 +88,17 @@ static void *amiga_icon_get_internal(const struct content *c, void *context)
 	return icon_c->bitmap;
 }
 
+static bool amiga_icon_is_opaque(struct content *c)
+{
+	amiga_icon_content *icon_c = (amiga_icon_content *)c;
+
+	if (icon_c->bitmap != NULL) {
+		return guit->bitmap->get_opaque(icon_c->bitmap);
+	}
+
+	return false;
+}
+
 static const content_handler amiga_icon_content_handler = {
 	.create = amiga_icon_create,
 	.data_complete = amiga_icon_convert,
@@ -93,6 +107,7 @@ static const content_handler amiga_icon_content_handler = {
 	.clone = amiga_icon_clone,
 	.get_internal = amiga_icon_get_internal,
 	.type = amiga_icon_content_type,
+	.is_opaque = amiga_icon_is_opaque,
 	.no_share = false,
 };
 
@@ -154,7 +169,8 @@ bool amiga_icon_convert(struct content *c)
 	/* This loader will only work on local files, so fail if not a local path */
 	if(filename == NULL)
 	{
-		msg_data.error = messages_get("NoMemory");
+		msg_data.errordata.errorcode = NSERROR_NOMEM;
+		msg_data.errordata.errormsg = messages_get("NoMemory");
 		content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 		return false;
 	}
@@ -166,7 +182,8 @@ bool amiga_icon_convert(struct content *c)
 
 	if(dobj == NULL)
 	{
-		msg_data.error = messages_get("NoMemory");
+		msg_data.errordata.errorcode = NSERROR_NOMEM;
+		msg_data.errordata.errormsg = messages_get("NoMemory");
 		content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 		return false;
 	}
@@ -186,14 +203,16 @@ bool amiga_icon_convert(struct content *c)
 
 	icon_c->bitmap = amiga_bitmap_create(width, height, BITMAP_NEW);
 	if (!icon_c->bitmap) {
-		msg_data.error = messages_get("NoMemory");
+		msg_data.errordata.errorcode = NSERROR_NOMEM;
+		msg_data.errordata.errormsg = messages_get("NoMemory");
 		content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 		if(dobj) FreeDiskObject(dobj);
 		return false;
 	}
 	imagebuf = (ULONG *) amiga_bitmap_get_buffer(icon_c->bitmap);
 	if (!imagebuf) {
-		msg_data.error = messages_get("NoMemory");
+		msg_data.errordata.errorcode = NSERROR_NOMEM;
+		msg_data.errordata.errormsg = messages_get("NoMemory");
 		content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 		if(dobj) FreeDiskObject(dobj);
 		return false;

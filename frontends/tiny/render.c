@@ -37,6 +37,7 @@
 #include "utils/utf8.h"
 #include "utils/utils.h"
 #include "netsurf/bitmap.h"
+#include "netsurf/browser.h"
 #include "netsurf/browser_window.h"
 #include "netsurf/content.h"
 #include "netsurf/layout.h"

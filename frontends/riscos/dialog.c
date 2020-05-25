@@ -39,6 +39,7 @@
 #include "utils/messages.h"
 #include "utils/nsurl.h"
 #include "desktop/version.h"
+#include "desktop/searchweb.h"
 #include "netsurf/browser_window.h"
 
 #include "riscos/configure.h"
@@ -49,9 +50,9 @@
 #include "riscos/gui.h"
 #include "riscos/window.h"
 #include "riscos/hotlist.h"
+#include "riscos/pageinfo.h"
 #include "riscos/menus.h"
 #include "riscos/save.h"
-#include "riscos/sslcert.h"
 #include "riscos/toolbar.h"
 #include "riscos/url_complete.h"
 #include "riscos/url_suggest.h"
@@ -72,7 +73,6 @@
 
 
 wimp_w dialog_info, dialog_saveas,
-	dialog_401li,
 	dialog_zoom, dialog_pageinfo, dialog_objinfo, dialog_tooltip,
 	dialog_warning,
 	dialog_folder, dialog_entry, dialog_search, dialog_print,
@@ -113,9 +113,6 @@ void ro_gui_dialog_init(void)
 
 	/* configure window */
 	ro_gui_configure_initialise();
-
-	/* 401 login window */
-	ro_gui_401login_init();
 
 	/* theme installation */
 	dialog_theme_install = ro_gui_dialog_create("theme_inst");
@@ -182,9 +179,6 @@ void ro_gui_dialog_init(void)
 	 * associated dialogues to be set up first.
 	 */
 
-	/* certificate verification window */
-	ro_gui_cert_initialise();
-
 	/* hotlist window */
 	ro_gui_hotlist_initialise();
 
@@ -196,6 +190,9 @@ void ro_gui_dialog_init(void)
 
 	/* cookies window */
 	ro_gui_cookies_initialise();
+
+	/* page info window */
+	ro_gui_pageinfo_initialise();
 }
 
 
@@ -339,12 +336,16 @@ void ro_gui_dialog_close(wimp_w close)
 {
 	int i;
 	wimp_caret caret;
+	wimp_w parent = (wimp_w)-1;
 	os_error *error;
 
 	/* Check if we're a persistent window */
 	for (i = 0; i < MAX_PERSISTENT; i++) {
 		if (persistent_dialog[i].dialog == close) {
 			/* We are => invalidate record */
+			if (persistent_dialog[i].parent != NULL) {
+				parent = persistent_dialog[i].parent;
+			}
 			persistent_dialog[i].parent = NULL;
 			persistent_dialog[i].dialog = NULL;
 			break;
@@ -367,7 +368,7 @@ void ro_gui_dialog_close(wimp_w close)
 		/* Check if we are a persistent window */
 		if (i < MAX_PERSISTENT) {
 			error = xwimp_set_caret_position(
-					persistent_dialog[i].parent,
+					parent,
 					wimp_ICON_WINDOW, -100, -100,
 					32, -1);
 			/* parent may have been closed first */
@@ -429,9 +430,9 @@ bool ro_gui_dialog_open_top(wimp_w w, struct toolbar *toolbar,
 	if (!open) {
 		int dimension;
 		int scroll_width;
-	  	/* cancel any editing */
-	  	if (ro_toolbar_get_editing(toolbar))
-	  		ro_toolbar_toggle_edit(toolbar);
+		/* cancel any editing */
+		if (ro_toolbar_get_editing(toolbar))
+			ro_toolbar_toggle_edit(toolbar);
 
 		/* move to the centre */
 		ro_gui_screen_size(&screen_width, &screen_height);
@@ -605,7 +606,7 @@ void ro_gui_dialog_open_persistent(wimp_w parent, wimp_w w, bool pointer) {
 
 
 void ro_gui_dialog_add_persistent(wimp_w parent, wimp_w w) {
-  	int i;
+	int i;
 
 	/* all persistant windows have a back icon */
 	ro_gui_wimp_update_window_furniture(w, wimp_WINDOW_BACK_ICON,
@@ -754,9 +755,9 @@ static bool ro_gui_dialog_open_url_init(void)
 		xwimp_close_template();
 		die(error->errmess);
 	}
-	
+
 	free(definition);
-	
+
 	ro_gui_wimp_event_register_menu_gright(dialog_openurl, ICON_OPENURL_URL,
 			ICON_OPENURL_MENU, ro_gui_url_suggest_menu);
 	ro_gui_wimp_event_register_cancel(dialog_openurl, ICON_OPENURL_CANCEL);
@@ -771,35 +772,31 @@ static bool ro_gui_dialog_open_url_init(void)
 
 
 
-bool ro_gui_dialog_openurl_apply(wimp_w w) {
-	const char *urltxt;
-	char *url2;
+bool ro_gui_dialog_openurl_apply(wimp_w w)
+{
+	nserror res;
+	const char *url_s;
 	nsurl *url;
-	nserror error;
 
-	urltxt = ro_gui_get_icon_string(w, ICON_OPENURL_URL);
-	url2 = strdup(urltxt); /** @todo why is this copied */
-	if (url2 == NULL) {
-		return false;
-	}
+	url_s = ro_gui_get_icon_string(w, ICON_OPENURL_URL);
 
-	error = nsurl_create(url2, &url);
-	free(url2);
-	if (error == NSERROR_OK) {
-		error = browser_window_create(BW_CREATE_HISTORY,
-				url,
-				NULL,
-				NULL,
-				NULL);
+	res = search_web_omni(url_s, SEARCH_WEB_OMNI_NONE, &url);
+
+	if (res == NSERROR_OK) {
+		res = browser_window_create(BW_CREATE_HISTORY,
+					    url,
+					    NULL,
+					    NULL,
+					    NULL);
 		nsurl_unref(url);
 	}
-	if (error != NSERROR_OK) {
-		ro_warn_user(messages_get_errorcode(error), 0);
+
+	if (res != NSERROR_OK) {
+		ro_warn_user(messages_get_errorcode(res), 0);
 		return false;
 	}
 
 	return true;
-	
 }
 
 

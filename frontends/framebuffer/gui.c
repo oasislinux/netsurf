@@ -153,7 +153,7 @@ widget_scroll_y(struct gui_window *gw, int y, bool abs)
 	int content_width, content_height;
 	int height;
 
-	NSLOG(netsurf, INFO, "window scroll");
+	NSLOG(netsurf, DEEPDEBUG, "window scroll");
 	if (abs) {
 		bwidget->pany = y - bwidget->scrolly;
 	} else {
@@ -237,7 +237,8 @@ fb_pan(fbtk_widget_t *widget,
 	height = fbtk_get_height(widget);
 	width = fbtk_get_width(widget);
 
-	NSLOG(netsurf, INFO, "panning %d, %d", bwidget->panx, bwidget->pany);
+	NSLOG(netsurf, DEEPDEBUG, "panning %d, %d",
+			bwidget->panx, bwidget->pany);
 
 	x = fbtk_get_absx(widget);
 	y = fbtk_get_absy(widget);
@@ -357,7 +358,6 @@ fb_redraw(fbtk_widget_t *widget,
 		.plot = &fb_plotters
 	};
 	nsfb_t *nsfb = fbtk_get_nsfb(widget);
-	float scale = browser_window_get_scale(bw);
 
 	x = fbtk_get_absx(widget);
 	y = fbtk_get_absy(widget);
@@ -377,8 +377,8 @@ fb_redraw(fbtk_widget_t *widget,
 	clip.y1 = bwidget->redraw_box.y1;
 
 	browser_window_redraw(bw,
-			(x - bwidget->scrollx) / scale,
-			(y - bwidget->scrolly) / scale,
+			x - bwidget->scrollx,
+			y - bwidget->scrolly,
 			&clip, &ctx);
 
 	if (fbtk_get_caret(widget, &caret_x, &caret_y, &caret_h)) {
@@ -450,12 +450,28 @@ static int fb_browser_window_destroy(fbtk_widget_t *widget,
 	return 0;
 }
 
+static void
+framebuffer_surface_iterator(void *ctx, const char *name, enum nsfb_type_e type)
+{
+	const char *arg0 = ctx;
 
+	fprintf(stderr, "%s: %s\n", arg0, name);
+}
+
+static enum nsfb_type_e fetype = NSFB_SURFACE_COUNT;
 static const char *fename;
 static int febpp;
 static int fewidth;
 static int feheight;
 static const char *feurl;
+
+static void
+framebuffer_pick_default_fename(void *ctx, const char *name, enum nsfb_type_e type)
+{
+	if (type < fetype) {
+		fename = name;
+	}
+}
 
 static bool
 process_cmdline(int argc, char** argv)
@@ -468,7 +484,8 @@ process_cmdline(int argc, char** argv)
 
 	NSLOG(netsurf, INFO, "argc %d, argv %p", argc, argv);
 
-	fename = "sdl";
+	nsfb_enumerate_surface_types(framebuffer_pick_default_fename, NULL);
+
 	febpp = 32;
 
 	fewidth = nsoption_int(window_width);
@@ -516,6 +533,16 @@ process_cmdline(int argc, char** argv)
 
 	if (optind < argc) {
 		feurl = argv[optind];
+	}
+
+	if (nsfb_type_from_name(fename) == NSFB_SURFACE_NONE) {
+		if (strcmp(fename, "?") != 0) {
+			fprintf(stderr,
+				"%s: Unknown surface `%s`\n", argv[0], fename);
+		}
+		fprintf(stderr, "%s: Valid surface names are:\n", argv[0]);
+		nsfb_enumerate_surface_types(framebuffer_surface_iterator, argv[0]);
+		return false;
 	}
 
 	return true;
@@ -627,9 +654,8 @@ fb_browser_window_click(fbtk_widget_t *widget, fbtk_callback_info *cbi)
 	struct gui_window *gw = cbi->context;
 	struct browser_widget_s *bwidget = fbtk_get_userpw(widget);
 	browser_mouse_state mouse;
-	float scale = browser_window_get_scale(gw->bw);
-	int x = (cbi->x + bwidget->scrollx) / scale;
-	int y = (cbi->y + bwidget->scrolly) / scale;
+	int x = cbi->x + bwidget->scrollx;
+	int y = cbi->y + bwidget->scrolly;
 	uint64_t time_now;
 	static struct {
 		enum { CLICK_SINGLE, CLICK_DOUBLE, CLICK_TRIPLE } type;
@@ -640,8 +666,8 @@ fb_browser_window_click(fbtk_widget_t *widget, fbtk_callback_info *cbi)
 	    cbi->event->type != NSFB_EVENT_KEY_UP)
 		return 0;
 
-	NSLOG(netsurf, INFO, "browser window clicked at %d,%d", cbi->x,
-	      cbi->y);
+	NSLOG(netsurf, DEEPDEBUG, "browser window clicked at %d,%d",
+			cbi->x, cbi->y);
 
 	switch (cbi->event->type) {
 	case NSFB_EVENT_KEY_DOWN:
@@ -666,15 +692,17 @@ fb_browser_window_click(fbtk_widget_t *widget, fbtk_callback_info *cbi)
 
 		case NSFB_KEY_MOUSE_4:
 			/* scroll up */
-			if (browser_window_scroll_at_point(gw->bw, x, y,
-					0, -100) == false)
+			if (browser_window_scroll_at_point(gw->bw,
+							   x, y,
+							   0, -100) == false)
 				widget_scroll_y(gw, -100, false);
 			break;
 
 		case NSFB_KEY_MOUSE_5:
 			/* scroll down */
-			if (browser_window_scroll_at_point(gw->bw, x, y,
-					0, 100) == false)
+			if (browser_window_scroll_at_point(gw->bw,
+							   x, y,
+							   0, 100) == false)
 				widget_scroll_y(gw, 100, false);
 			break;
 
@@ -782,9 +810,8 @@ fb_browser_window_move(fbtk_widget_t *widget, fbtk_callback_info *cbi)
 	browser_mouse_state mouse = 0;
 	struct gui_window *gw = cbi->context;
 	struct browser_widget_s *bwidget = fbtk_get_userpw(widget);
-	float scale = browser_window_get_scale(gw->bw);
-	int x = (cbi->x + bwidget->scrollx) / scale;
-	int y = (cbi->y + bwidget->scrolly) / scale;
+	int x = cbi->x + bwidget->scrollx;
+	int y = cbi->y + bwidget->scrolly;
 
 	if (gui_drag.state == GUI_DRAG_PRESSED &&
 			(abs(x - gui_drag.x) > 5 ||
@@ -908,6 +935,27 @@ fb_browser_window_input(fbtk_widget_t *widget, fbtk_callback_info *cbi)
 			if (browser_window_key_press(gw->bw,
 					NS_KEY_DOWN) == false)
 				widget_scroll_y(gw, 100, false);
+			break;
+
+		case NSFB_KEY_MINUS:
+			if (modifier & FBTK_MOD_RCTRL ||
+					modifier & FBTK_MOD_LCTRL) {
+				browser_window_set_scale(gw->bw, -0.1, false);
+			}
+			break;
+
+		case NSFB_KEY_EQUALS: /* PLUS */
+			if (modifier & FBTK_MOD_RCTRL ||
+					modifier & FBTK_MOD_LCTRL) {
+				browser_window_set_scale(gw->bw, 0.1, false);
+			}
+			break;
+
+		case NSFB_KEY_0:
+			if (modifier & FBTK_MOD_RCTRL ||
+					modifier & FBTK_MOD_LCTRL) {
+				browser_window_set_scale(gw->bw, 1.0, true);
+			}
 			break;
 
 		case NSFB_KEY_RSHIFT:
@@ -1121,7 +1169,7 @@ fb_url_enter(void *pw, char *text)
 
 	error = nsurl_create(text, &url);
 	if (error != NSERROR_OK) {
-		fb_warn_user(messages_get_errorcode(error), 0);
+		fb_warn_user("Errorcode:", messages_get_errorcode(error));
 	} else {
 		browser_window_navigate(bw, url, NULL, BW_NAVIGATE_HISTORY,
 				NULL, NULL, NULL);
@@ -1841,10 +1889,9 @@ static bool
 gui_window_get_scroll(struct gui_window *g, int *sx, int *sy)
 {
 	struct browser_widget_s *bwidget = fbtk_get_userpw(g->browser);
-	float scale = browser_window_get_scale(g->bw);
 
-	*sx = bwidget->scrollx / scale;
-	*sy = bwidget->scrolly / scale;
+	*sx = bwidget->scrollx;
+	*sy = bwidget->scrolly;
 
 	return true;
 }
@@ -1864,12 +1911,11 @@ static nserror
 gui_window_set_scroll(struct gui_window *gw, const struct rect *rect)
 {
 	struct browser_widget_s *bwidget = fbtk_get_userpw(gw->browser);
-	float scale = browser_window_get_scale(gw->bw);
 
 	assert(bwidget);
 
-	widget_scroll_x(gw, rect->x0 * scale, true);
-	widget_scroll_y(gw, rect->y0 * scale, true);
+	widget_scroll_x(gw, rect->x0, true);
+	widget_scroll_y(gw, rect->y0, true);
 
 	return NSERROR_OK;
 }
@@ -1881,23 +1927,14 @@ gui_window_set_scroll(struct gui_window *gw, const struct rect *rect)
  * \param gw The gui window to measure content area of.
  * \param width receives width of window
  * \param height receives height of window
- * \param scaled whether to return scaled values
  * \return NSERROR_OK on sucess and width and height updated.
  */
 static nserror
-gui_window_get_dimensions(struct gui_window *gw,
-			  int *width,
-			  int *height,
-			  bool scaled)
+gui_window_get_dimensions(struct gui_window *gw, int *width, int *height)
 {
 	*width = fbtk_get_width(gw->browser);
 	*height = fbtk_get_height(gw->browser);
 
-	if (scaled) {
-		float scale = browser_window_get_scale(gw->bw);
-		*width /= scale;
-		*height /= scale;
-	}
 	return NSERROR_OK;
 }
 
@@ -2077,6 +2114,38 @@ gui_window_remove_caret(struct gui_window *g)
 	}
 }
 
+/**
+ * process miscellaneous window events
+ *
+ * \param gw The window receiving the event.
+ * \param event The event code.
+ * \return NSERROR_OK when processed ok
+ */
+static nserror
+gui_window_event(struct gui_window *gw, enum gui_window_event event)
+{
+	switch (event) {
+	case GW_EVENT_UPDATE_EXTENT:
+		gui_window_update_extent(gw);
+		break;
+
+	case GW_EVENT_REMOVE_CARET:
+		gui_window_remove_caret(gw);
+		break;
+
+	case GW_EVENT_START_THROBBER:
+		gui_window_start_throbber(gw);
+		break;
+
+	case GW_EVENT_STOP_THROBBER:
+		gui_window_stop_throbber(gw);
+		break;
+
+	default:
+		break;
+	}
+	return NSERROR_OK;
+}
 
 static struct gui_window_table framebuffer_window_table = {
 	.create = gui_window_create,
@@ -2085,21 +2154,17 @@ static struct gui_window_table framebuffer_window_table = {
 	.get_scroll = gui_window_get_scroll,
 	.set_scroll = gui_window_set_scroll,
 	.get_dimensions = gui_window_get_dimensions,
-	.update_extent = gui_window_update_extent,
+	.event = gui_window_event,
 
 	.set_url = gui_window_set_url,
 	.set_status = gui_window_set_status,
 	.set_pointer = gui_window_set_pointer,
 	.place_caret = gui_window_place_caret,
-	.remove_caret = gui_window_remove_caret,
-	.start_throbber = gui_window_start_throbber,
-	.stop_throbber = gui_window_stop_throbber,
 };
 
 
 static struct gui_misc_table framebuffer_misc_table = {
 	.schedule = framebuffer_schedule,
-	.warning = fb_warn_user,
 
 	.quit = gui_quit,
 };
@@ -2201,7 +2266,7 @@ main(int argc, char** argv)
 		nsurl_unref(url);
 	}
 	if (ret != NSERROR_OK) {
-		fb_warn_user(messages_get_errorcode(ret), 0);
+		fb_warn_user("Errorcode:", messages_get_errorcode(ret));
 	} else {
 		framebuffer_run();
 

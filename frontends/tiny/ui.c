@@ -843,7 +843,7 @@ window_set_scroll(struct gui_window *g, const struct rect *r)
 }
 
 static nserror
-window_get_dimensions(struct gui_window *g, int *width, int *height, bool scaled)
+window_get_dimensions(struct gui_window *g, int *width, int *height)
 {
 	struct element *e = &g->ui[UI_CONTENT];
 
@@ -976,6 +976,33 @@ window_place_caret(struct gui_window *g, int x, int y, int h, const struct rect 
 	placecaret(g, e->r.x0 - g->scroll.x, e->r.y0 - g->scroll.y, x, y, h, clip);
 }
 
+/**
+ * process miscellaneous window events
+ *
+ * \param gw The window receiving the event.
+ * \param event The event code.
+ * \return NSERROR_OK when processed ok
+ */
+static nserror
+window_event(struct gui_window *gw, enum gui_window_event event)
+{
+	switch (event) {
+	case GW_EVENT_UPDATE_EXTENT:
+		window_update_extent(gw);
+		break;
+	case GW_EVENT_REMOVE_CARET:
+		window_remove_caret(gw);
+		break;
+	case GW_EVENT_START_THROBBER:
+		window_start_throbber(gw);
+		break;
+	case GW_EVENT_STOP_THROBBER:
+		window_stop_throbber(gw);
+		break;
+	}
+	return NSERROR_OK;
+}
+
 static struct gui_window_table window_table = {
 	.create = window_create,
 	.destroy = window_destroy,
@@ -983,25 +1010,20 @@ static struct gui_window_table window_table = {
 	.get_scroll = window_get_scroll,
 	.set_scroll = window_set_scroll,
 	.get_dimensions = window_get_dimensions,
-	.update_extent = window_update_extent,
+	.event = window_event,
 	.set_title = window_set_title,
 	.set_url = window_set_url,
 	/* set_icon */
 	.set_status = window_set_status,
 	.set_pointer = window_set_pointer,
 	.place_caret = window_place_caret,
-	.remove_caret = window_remove_caret,
-	.start_throbber = window_start_throbber,
-	.stop_throbber = window_stop_throbber,
 	/* drag_start */
 	/* save_link */
-	/* scroll_start */
-	/* new_content */
 	/* create_form_select_menu */
 	/* file_gadget_open */
 	/* drag_save_object */
 	/* drag_save_selection */
-	/* start_selection */
+	/* console_log */
 };
 
 struct gui_window_table *tiny_window_table = &window_table;

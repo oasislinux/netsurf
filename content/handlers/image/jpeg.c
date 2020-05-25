@@ -33,7 +33,9 @@
 #include "utils/messages.h"
 #include "netsurf/bitmap.h"
 #include "content/llcache.h"
+#include "content/content.h"
 #include "content/content_protected.h"
+#include "content/content_factory.h"
 #include "desktop/gui_internal.h"
 
 #include "image/image_cache.h"
@@ -329,7 +331,8 @@ static bool nsjpeg_convert(struct content *c)
 	if (setjmp(setjmp_buffer)) {
 		jpeg_destroy_decompress(&cinfo);
 
-		msg_data.error = nsjpeg_error_buffer;
+		msg_data.errordata.errorcode = NSERROR_UNKNOWN;
+		msg_data.errordata.errormsg = nsjpeg_error_buffer;
 		content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 		return false;
 	}
@@ -411,6 +414,7 @@ static const content_handler nsjpeg_content_handler = {
 	.clone = nsjpeg_clone,
 	.get_internal = image_cache_get_internal,
 	.type = image_cache_content_type,
+	.is_opaque = image_cache_is_opaque,
 	.no_share = false,
 };
 

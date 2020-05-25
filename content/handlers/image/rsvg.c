@@ -49,6 +49,7 @@
 #include "netsurf/content.h"
 #include "content/llcache.h"
 #include "content/content_protected.h"
+#include "content/content_factory.h"
 #include "desktop/gui_internal.h"
 
 #include "image/rsvg.h"
@@ -71,7 +72,7 @@ static nserror rsvg_create_svg_data(rsvg_content *c)
 
 	if ((c->rsvgh = rsvg_handle_new()) == NULL) {
 		NSLOG(netsurf, INFO, "rsvg_handle_new() returned NULL.");
-		content_broadcast_errorcode(&c->base, NSERROR_NOMEM);
+		content_broadcast_error(&c->base, NSERROR_NOMEM, NULL);
 		return NSERROR_NOMEM;
 	}
 
@@ -120,7 +121,7 @@ static bool rsvg_process_data(struct content *c, const char *data,
 				&err) == FALSE) {
 		NSLOG(netsurf, INFO,
 		      "rsvg_handle_write returned an error: %s", err->message);
-		content_broadcast_errorcode(c, NSERROR_SVG_ERROR);
+		content_broadcast_error(c, NSERROR_SVG_ERROR, NULL);
 		return false;
 	}
 
@@ -171,7 +172,7 @@ static bool rsvg_convert(struct content *c)
 	if (rsvg_handle_close(d->rsvgh, &err) == FALSE) {
 		NSLOG(netsurf, INFO,
 		      "rsvg_handle_close returned an error: %s", err->message);
-		content_broadcast_errorcode(c, NSERROR_SVG_ERROR);
+		content_broadcast_error(c, NSERROR_SVG_ERROR, NULL);
 		return false;
 	}
 
@@ -189,7 +190,7 @@ static bool rsvg_convert(struct content *c)
 			BITMAP_NEW)) == NULL) {
 		NSLOG(netsurf, INFO,
 		      "Failed to create bitmap for rsvg render.");
-		content_broadcast_errorcode(c, NSERROR_NOMEM);
+		content_broadcast_error(c, NSERROR_NOMEM, NULL);
 		return false;
 	}
 
@@ -200,14 +201,14 @@ static bool rsvg_convert(struct content *c)
 			guit->bitmap->get_rowstride(d->bitmap))) == NULL) {
 		NSLOG(netsurf, INFO,
 		      "Failed to create Cairo image surface for rsvg render.");
-		content_broadcast_errorcode(c, NSERROR_NOMEM);
+		content_broadcast_error(c, NSERROR_NOMEM, NULL);
 		return false;
 	}
 
 	if ((d->ct = cairo_create(d->cs)) == NULL) {
 		NSLOG(netsurf, INFO,
 		      "Failed to create Cairo drawing context for rsvg render.");
-		content_broadcast_errorcode(c, NSERROR_NOMEM);
+		content_broadcast_error(c, NSERROR_NOMEM, NULL);
 		return false;
 	}
 
@@ -315,6 +316,19 @@ static content_type rsvg_content_type(void)
 	return CONTENT_IMAGE;
 }
 
+
+static bool rsvg_content_is_opaque(struct content *c)
+{
+	rsvg_content *d = (rsvg_content *) c;
+
+	if (d->bitmap != NULL) {
+		return guit->bitmap->get_opaque(d->bitmap);
+	}
+
+	return false;
+}
+
+
 static const content_handler rsvg_content_handler = {
 	.create = rsvg_create,
 	.process_data = rsvg_process_data,
@@ -324,6 +338,7 @@ static const content_handler rsvg_content_handler = {
 	.clone = rsvg_clone,
 	.get_internal = rsvg_get_internal,
 	.type = rsvg_content_type,
+	.is_opaque = rsvg_content_is_opaque,
 	.no_share = false,
 };
 

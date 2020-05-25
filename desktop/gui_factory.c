@@ -55,14 +55,6 @@ static nserror gui_default_window_set_url(struct gui_window *g, struct nsurl *ur
 	return NSERROR_OK;
 }
 
-static void gui_default_window_start_throbber(struct gui_window *g)
-{
-}
-
-static void gui_default_window_stop_throbber(struct gui_window *g)
-{
-}
-
 static bool gui_default_window_drag_start(struct gui_window *g,
 					  gui_drag_type type,
 					  const struct rect *rect)
@@ -82,17 +74,6 @@ static void gui_default_window_set_icon(struct gui_window *g,
 {
 }
 
-
-static void gui_default_window_new_content(struct gui_window *g)
-{
-}
-
-
-static bool gui_default_window_scroll_start(struct gui_window *g)
-{
-	return true;
-}
-
 static void gui_default_window_set_pointer(struct gui_window *g,
 					   gui_pointer_shape shape)
 {
@@ -106,10 +87,6 @@ static void gui_default_window_set_status(struct gui_window *g,
 static void gui_default_window_place_caret(struct gui_window *g,
 					   int x, int y, int height,
 					   const struct rect *clip)
-{
-}
-
-static void gui_default_window_remove_caret(struct gui_window *g)
 {
 }
 
@@ -135,9 +112,6 @@ static void gui_default_window_drag_save_selection(struct gui_window *g,
 {
 }
 
-static void gui_default_window_start_selection(struct gui_window *g)
-{
-}
 
 static void
 gui_default_console_log(struct gui_window *gw,
@@ -176,7 +150,7 @@ static nserror verify_window_register(struct gui_window_table *gwt)
 	if (gwt->get_dimensions == NULL) {
 		return NSERROR_BAD_PARAMETER;
 	}
-	if (gwt->update_extent == NULL) {
+	if (gwt->event == NULL) {
 		return NSERROR_BAD_PARAMETER;
 	}
 
@@ -200,26 +174,11 @@ static nserror verify_window_register(struct gui_window_table *gwt)
 	if (gwt->place_caret == NULL) {
 		gwt->place_caret = gui_default_window_place_caret;
 	}
-	if (gwt->remove_caret == NULL) {
-		gwt->remove_caret = gui_default_window_remove_caret;
-	}
-	if (gwt->start_throbber == NULL) {
-		gwt->start_throbber = gui_default_window_start_throbber;
-	}
-	if (gwt->stop_throbber == NULL) {
-		gwt->stop_throbber = gui_default_window_stop_throbber;
-	}
 	if (gwt->drag_start == NULL) {
 		gwt->drag_start = gui_default_window_drag_start;
 	}
 	if (gwt->save_link == NULL) {
 		gwt->save_link = gui_default_window_save_link;
-	}
-	if (gwt->new_content == NULL) {
-		gwt->new_content = gui_default_window_new_content;
-	}
-	if (gwt->scroll_start == NULL) {
-		gwt->scroll_start = gui_default_window_scroll_start;
 	}
 	if (gwt->create_form_select_menu == NULL) {
 		gwt->create_form_select_menu =
@@ -233,9 +192,6 @@ static nserror verify_window_register(struct gui_window_table *gwt)
 	}
 	if (gwt->drag_save_selection == NULL) {
 		gwt->drag_save_selection = gui_default_window_drag_save_selection;
-	}
-	if (gwt->start_selection == NULL) {
-		gwt->start_selection = gui_default_window_start_selection;
 	}
 	if (gwt->console_log == NULL) {
 		gwt->console_log = gui_default_console_log;
@@ -577,7 +533,7 @@ static nserror verify_file_register(struct gui_file_table *gft)
  * verify bitmap table is valid
  *
  * \param gbt The bitmap table to verify.
- * \return NSERROR_OK if teh table is valid else NSERROR_BAD_PARAMETER.
+ * \return NSERROR_OK if the table is valid else NSERROR_BAD_PARAMETER.
  */
 static nserror verify_bitmap_register(struct gui_bitmap_table *gbt)
 {
@@ -682,21 +638,14 @@ static nserror gui_default_launch_url(struct nsurl *url)
 }
 
 
-static nserror gui_default_cert_verify(nsurl *url,
-				    const struct ssl_cert_info *certs,
-				    unsigned long num,
-				    nserror (*cb)(bool proceed, void *pw),
-				    void *cbpw)
-{
-	return NSERROR_NOT_IMPLEMENTED;
-}
-
-static nserror gui_default_401login_open(nsurl *url, const char *realm,
-		const char *username, const char *password,
-		nserror (*cb)(const char *username,
-				const char *password,
-				void *pw),
-		void *cbpw)
+static nserror gui_default_401login_open(
+	nsurl *url, const char *realm,
+	const char *username, const char *password,
+	nserror (*cb)(nsurl *url, const char * realm,
+		      const char *username,
+		      const char *password,
+		      void *pw),
+	void *cbpw)
 {
 	return NSERROR_NOT_IMPLEMENTED;
 }
@@ -706,6 +655,12 @@ gui_default_pdf_password(char **owner_pass, char **user_pass, char *path)
 {
 	*owner_pass = NULL;
 	save_pdf(path);
+}
+
+static nserror
+gui_default_present_cookies(const char *search_term)
+{
+	return NSERROR_NOT_IMPLEMENTED;
 }
 
 /** verify misc table is valid */
@@ -720,9 +675,6 @@ static nserror verify_misc_register(struct gui_misc_table *gmt)
 	if (gmt->schedule == NULL) {
 		return NSERROR_BAD_PARAMETER;
 	}
-	if (gmt->warning == NULL) {
-		return NSERROR_BAD_PARAMETER;
-	}
 
 	/* fill in the optional entries with defaults */
 	if (gmt->quit == NULL) {
@@ -731,14 +683,14 @@ static nserror verify_misc_register(struct gui_misc_table *gmt)
 	if (gmt->launch_url == NULL) {
 		gmt->launch_url = gui_default_launch_url;
 	}
-	if (gmt->cert_verify == NULL) {
-		gmt->cert_verify = gui_default_cert_verify;
-	}
 	if (gmt->login == NULL) {
 		gmt->login = gui_default_401login_open;
 	}
 	if (gmt->pdf_password == NULL) {
 		gmt->pdf_password = gui_default_pdf_password;
+	}
+	if (gmt->present_cookies == NULL) {
+		gmt->present_cookies = gui_default_present_cookies;
 	}
 	return NSERROR_OK;
 }

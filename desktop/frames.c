@@ -35,6 +35,7 @@
 #include "content/hlcache.h"
 #include "html/html.h"
 #include "html/box.h"
+#include "html/box_inspect.h"
 
 #include "desktop/browser_private.h"
 #include "desktop/frames.h"
@@ -436,7 +437,9 @@ void browser_window_recalculate_frameset(struct browser_window *bw)
 
 	/* window dimensions */
 	if (!bw->parent) {
-		browser_window_get_dimensions(bw, &bw_width, &bw_height, true);
+		browser_window_get_dimensions(bw, &bw_width, &bw_height);
+		bw_width /= bw->scale;
+		bw_height /= bw->scale;
 		bw->x = 0;
 		bw->y = 0;
 		bw->width = bw_width;

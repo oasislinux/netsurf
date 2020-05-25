@@ -33,6 +33,7 @@
 #include "netsurf/content.h"
 #include "content/llcache.h"
 #include "content/content_protected.h"
+#include "content/content_factory.h"
 #include "desktop/gui_internal.h"
 
 #include "image/bmp.h"
@@ -78,7 +79,7 @@ static nserror nsbmp_create_bmp_data(nsbmp_content *bmp)
 
 	bmp->bmp = calloc(sizeof(struct bmp_image), 1);
 	if (bmp->bmp == NULL) {
-		content_broadcast_errorcode(&bmp->base, NSERROR_NOMEM);
+		content_broadcast_error(&bmp->base, NSERROR_NOMEM, NULL);
 		return NSERROR_NOMEM;
 	}
 
@@ -87,10 +88,14 @@ static nserror nsbmp_create_bmp_data(nsbmp_content *bmp)
 	return NSERROR_OK;
 }
 
-static nserror nsbmp_create(const content_handler *handler,
-		lwc_string *imime_type, const struct http_parameter *params,
-		llcache_handle *llcache, const char *fallback_charset,
-		bool quirks, struct content **c)
+static nserror
+nsbmp_create(const struct content_handler *handler,
+	     lwc_string *imime_type,
+	     const struct http_parameter *params,
+	     llcache_handle *llcache,
+	     const char *fallback_charset,
+	     bool quirks,
+	     struct content **c)
 {
 	nsbmp_content *bmp;
 	nserror error;
@@ -135,11 +140,11 @@ static bool nsbmp_convert(struct content *c)
 		case BMP_OK:
 			break;
 		case BMP_INSUFFICIENT_MEMORY:
-			content_broadcast_errorcode(c, NSERROR_NOMEM);
+			content_broadcast_error(c, NSERROR_NOMEM, NULL);
 			return false;
 		case BMP_INSUFFICIENT_DATA:
 		case BMP_DATA_ERROR:
-			content_broadcast_errorcode(c, NSERROR_BMP_ERROR);
+			content_broadcast_error(c, NSERROR_BMP_ERROR, NULL);
 			return false;
 	}
 
@@ -259,6 +264,16 @@ static content_type nsbmp_content_type(void)
 	return CONTENT_IMAGE;
 }
 
+static bool nsbmp_content_is_opaque(struct content *c)
+{
+	nsbmp_content *bmp = (nsbmp_content *)c;
+
+	if (bmp->bitmap != NULL) {
+		return guit->bitmap->get_opaque(bmp->bitmap);
+	}
+
+	return false;
+}
 
 static const content_handler nsbmp_content_handler = {
 	.create = nsbmp_create,
@@ -268,6 +283,7 @@ static const content_handler nsbmp_content_handler = {
 	.clone = nsbmp_clone,
 	.get_internal = nsbmp_get_internal,
 	.type = nsbmp_content_type,
+	.is_opaque = nsbmp_content_is_opaque,
 	.no_share = false,
 };
 

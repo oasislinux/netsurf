@@ -36,7 +36,9 @@
 #include "netsurf/plotters.h"
 #include "netsurf/content.h"
 #include "content/llcache.h"
+#include "content/content.h"
 #include "content/content_protected.h"
+#include "content/content_factory.h"
 
 #include "riscos/gui.h"
 #include "riscos/image.h"
@@ -126,7 +128,8 @@ bool sprite_convert(struct content *c)
 
 	/* check for bad data */
 	if ((int)source_size + 4 != area->used) {
-		msg_data.error = messages_get("BadSprite");
+		msg_data.errordata.errorcode = NSERROR_UNKNOWN;
+		msg_data.errordata.errormsg = messages_get("BadSprite");
 		content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 		return false;
 	}
@@ -140,7 +143,8 @@ bool sprite_convert(struct content *c)
 		      "xosspriteop_read_sprite_info: 0x%x: %s",
 		      error->errnum,
 		      error->errmess);
-		msg_data.error = error->errmess;
+		msg_data.errordata.errorcode = NSERROR_UNKNOWN;
+		msg_data.errordata.errormsg = error->errmess;
 		content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 		return false;
 	}

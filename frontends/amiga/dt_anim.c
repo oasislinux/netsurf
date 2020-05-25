@@ -40,7 +40,9 @@
 #include "netsurf/plotters.h"
 #include "netsurf/bitmap.h"
 #include "netsurf/content.h"
+#include "content/content.h"
 #include "content/content_protected.h"
+#include "content/content_factory.h"
 #include "content/llcache.h"
 
 #include "amiga/bitmap.h"
@@ -189,7 +191,8 @@ bool amiga_dt_anim_convert(struct content *c)
 
 			plugin->bitmap = amiga_bitmap_create(width, height, bm_flags);
 			if (!plugin->bitmap) {
-				msg_data.error = messages_get("NoMemory");
+				msg_data.errordata.errorcode = NSERROR_NOMEM;
+				msg_data.errordata.errormsg = messages_get("NoMemory");
 				content_broadcast(c, CONTENT_MSG_ERROR, &msg_data);
 				return false;
 			}

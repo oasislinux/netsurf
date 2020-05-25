@@ -43,6 +43,7 @@
 #include <nsutils/time.h>
 
 #include "utils/corestrings.h"
+#include "utils/hashmap.h"
 #include "utils/nsoption.h"
 #include "utils/log.h"
 #include "utils/messages.h"
@@ -60,10 +61,14 @@
 #include "content/fetchers/curl.h"
 #include "content/urldb.h"
 
-/** maximum number of progress notifications per second */
+/**
+ * maximum number of progress notifications per second
+ */
 #define UPDATES_PER_SECOND 2
 
-/* the ciphersuites we are willing to use */
+/**
+ * The ciphersuites the browser is prepared to use
+ */
 #define CIPHER_LIST						\
 	/* disable everything */				\
 	"-ALL:"							\
@@ -78,10 +83,144 @@
 	/* Remove any PFS suites using weak DSA key exchange */	\
 	"-DSS"
 
+/* Open SSL compatability for certificate handling */
+#ifdef WITH_OPENSSL
+
+#include <openssl/ssl.h>
+#include <openssl/x509v3.h>
+
+/* OpenSSL 1.0.x to 1.1.0 certificate reference counting changed
+ * LibreSSL declares its OpenSSL version as 2.1 but only supports the old way
+ */
+#if (defined(LIBRESSL_VERSION_NUMBER) || (OPENSSL_VERSION_NUMBER < 0x1010000fL))
+static int ns_X509_up_ref(X509 *cert)
+{
+	cert->references++;
+	return 1;
+}
+
+static void ns_X509_free(X509 *cert)
+{
+	cert->references--;
+	if (cert->references == 0) {
+		X509_free(cert);
+	}
+}
+#else
+#define ns_X509_up_ref X509_up_ref
+#define ns_X509_free X509_free
+#endif
+
+#else /* WITH_OPENSSL */
+
+typedef char X509;
+
+static void ns_X509_free(X509 *cert)
+{
+	free(cert);
+}
+
+#endif /* WITH_OPENSSL */
+
+/* SSL certificate chain cache */
+
+/* We're only interested in the hostname and port */
+static uint32_t
+curl_fetch_ssl_key_hash(void *key)
+{
+	nsurl *url = key;
+	lwc_string *hostname = nsurl_get_component(url, NSURL_HOST);
+	lwc_string *port = nsurl_get_component(url, NSURL_PORT);
+	uint32_t hash;
+
+	if (port == NULL)
+		port = lwc_string_ref(corestring_lwc_443);
+
+	hash = lwc_string_hash_value(hostname) ^ lwc_string_hash_value(port);
+
+	lwc_string_unref(hostname);
+	lwc_string_unref(port);
+
+	return hash;
+}
+
+/* We only compare the hostname and port */
+static bool
+curl_fetch_ssl_key_eq(void *key1, void *key2)
+{
+	nsurl *url1 = key1;
+	nsurl *url2 = key2;
+	lwc_string *hostname1 = nsurl_get_component(url1, NSURL_HOST);
+	lwc_string *hostname2 = nsurl_get_component(url2, NSURL_HOST);
+	lwc_string *port1 = nsurl_get_component(url1, NSURL_PORT);
+	lwc_string *port2 = nsurl_get_component(url2, NSURL_PORT);
+	bool iseq = false;
+
+	if (port1 == NULL)
+		port1 = lwc_string_ref(corestring_lwc_443);
+	if (port2 == NULL)
+		port2 = lwc_string_ref(corestring_lwc_443);
+
+	if (lwc_string_isequal(hostname1, hostname2, &iseq) != lwc_error_ok ||
+			iseq == false)
+		goto out;
+
+	iseq = false;
+	if (lwc_string_isequal(port1, port2, &iseq) != lwc_error_ok)
+		goto out;
+
+out:
+	lwc_string_unref(hostname1);
+	lwc_string_unref(hostname2);
+	lwc_string_unref(port1);
+	lwc_string_unref(port2);
+
+	return iseq;
+}
+
+static void *
+curl_fetch_ssl_value_alloc(void *key)
+{
+	struct cert_chain *out;
+
+	if (cert_chain_alloc(0, &out) != NSERROR_OK) {
+		return NULL;
+	}
+
+	return out;
+}
+
+static void
+curl_fetch_ssl_value_destroy(void *value)
+{
+	struct cert_chain *chain = value;
+	if (cert_chain_free(chain) != NSERROR_OK) {
+		NSLOG(netsurf, WARNING, "Problem freeing SSL certificate chain");
+	}
+}
+
+static hashmap_parameters_t curl_fetch_ssl_hashmap_parameters = {
+	.key_clone = (hashmap_key_clone_t)nsurl_ref,
+	.key_destroy = (hashmap_key_destroy_t)nsurl_unref,
+	.key_eq = curl_fetch_ssl_key_eq,
+	.key_hash = curl_fetch_ssl_key_hash,
+	.value_alloc = curl_fetch_ssl_value_alloc,
+	.value_destroy = curl_fetch_ssl_value_destroy,
+};
+
+static hashmap_t *curl_fetch_ssl_hashmap = NULL;
+
+/** SSL certificate info */
+struct cert_info {
+	X509 *cert;		/**< Pointer to certificate */
+	long err;		/**< OpenSSL error code */
+};
+
 /** Information for a single fetch. */
 struct curl_fetch_info {
 	struct fetch *fetch_handle; /**< The fetch handle we're parented by. */
 	CURL * curl_handle;	/**< cURL handle if being fetched, or 0. */
+	bool sent_ssl_chain;	/**< Have we tried to send the SSL chain */
 	bool had_headers;	/**< Headers have been processed. */
 	bool abort;		/**< Abort requested. */
 	bool stopped;		/**< Download stopped on purpose. */
@@ -98,6 +237,8 @@ struct curl_fetch_info {
 	long http_code; /**< HTTP result code from cURL. */
 	struct curl_httppost *post_multipart;	/**< Multipart post data, or 0. */
 	uint64_t last_progress_update;	/**< Time of last progress update */
+	int cert_depth; /**< deepest certificate in use */
+	struct cert_info cert_data[MAX_CERT_DEPTH]; /**< HTTPS certificate data */
 };
 
 /** curl handle cache entry */
@@ -120,6 +261,9 @@ static struct cache_handle *curl_handle_ring = 0;
 
 /** Count of how many schemes the curl fetcher is handling */
 static int curl_fetchers_registered = 0;
+
+/** Flag for runtime detection of openssl usage */
+static bool curl_with_openssl;
 
 /** Error buffer for cURL. */
 static char fetch_error_buffer[CURL_ERROR_SIZE];
@@ -169,6 +313,10 @@ static void fetch_curl_finalise(lwc_string *scheme)
 			      "curl_multi_cleanup failed: ignoring");
 
 		curl_global_cleanup();
+
+		NSLOG(netsurf, DEBUG, "Cleaning up SSL cert chain hashmap");
+		hashmap_destroy(curl_fetch_ssl_hashmap);
+		curl_fetch_ssl_hashmap = NULL;
 	}
 
 	/* Free anything remaining in the cached curl handle ring */
@@ -318,6 +466,7 @@ fetch_curl_setup(struct fetch *parent_fetch,
 
 	/* construct a new fetch structure */
 	fetch->curl_handle = NULL;
+	fetch->sent_ssl_chain = false;
 	fetch->had_headers = false;
 	fetch->abort = false;
 	fetch->stopped = false;
@@ -339,6 +488,10 @@ fetch_curl_setup(struct fetch *parent_fetch,
 		fetch->post_multipart = fetch_curl_post_convert(post_multipart);
 	}
 	fetch->last_progress_update = 0;
+
+	/* Clear certificate chain data */
+	memset(fetch->cert_data, 0, sizeof(fetch->cert_data));
+	fetch->cert_depth = -1;
 
 	if ((fetch->host == NULL) ||
 	    (post_multipart != NULL && fetch->post_multipart == NULL) ||
@@ -404,6 +557,315 @@ failed:
 }
 
 
+#ifdef WITH_OPENSSL
+
+/**
+ * Retrieve the ssl cert chain for the fetch, creating a blank one if needed
+ */
+static struct cert_chain *
+fetch_curl_get_cached_chain(struct curl_fetch_info *f)
+{
+	struct cert_chain *chain;
+
+	chain = hashmap_lookup(curl_fetch_ssl_hashmap, f->url);
+	if (chain == NULL) {
+		chain = hashmap_insert(curl_fetch_ssl_hashmap, f->url);
+	}
+
+	return chain;
+}
+
+/**
+ * Report the certificate information in the fetch to the users
+ */
+static void
+fetch_curl_store_certs_in_cache(struct curl_fetch_info *f)
+{
+	size_t depth;
+	BIO *mem;
+	BUF_MEM *buf[MAX_CERT_DEPTH];
+	struct cert_chain chain, *cached_chain;
+	struct cert_info *certs;
+
+	memset(&chain, 0, sizeof(chain));
+
+	certs = f->cert_data;
+	chain.depth = f->cert_depth + 1; /* 0 indexed certificate depth */
+
+	for (depth = 0; depth < chain.depth; depth++) {
+		if (certs[depth].cert == NULL) {
+			/* This certificate is missing, skip it */
+			chain.certs[depth].err = SSL_CERT_ERR_CERT_MISSING;
+			continue;
+		}
+
+		/* error code (if any) */
+		switch (certs[depth].err) {
+		case X509_V_OK:
+			chain.certs[depth].err = SSL_CERT_ERR_OK;
+			break;
+
+		case X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT:
+			/* fallthrough */
+		case X509_V_ERR_UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY:
+			chain.certs[depth].err = SSL_CERT_ERR_BAD_ISSUER;
+			break;
+
+		case X509_V_ERR_UNABLE_TO_DECRYPT_CERT_SIGNATURE:
+			/* fallthrough */
+		case X509_V_ERR_UNABLE_TO_DECRYPT_CRL_SIGNATURE:
+			/* fallthrough */
+		case X509_V_ERR_CERT_SIGNATURE_FAILURE:
+			/* fallthrough */
+		case X509_V_ERR_CRL_SIGNATURE_FAILURE:
+			chain.certs[depth].err = SSL_CERT_ERR_BAD_SIG;
+			break;
+
+		case X509_V_ERR_CERT_NOT_YET_VALID:
+			/* fallthrough */
+		case X509_V_ERR_CRL_NOT_YET_VALID:
+			chain.certs[depth].err = SSL_CERT_ERR_TOO_YOUNG;
+			break;
+
+		case X509_V_ERR_CERT_HAS_EXPIRED:
+			/* fallthrough */
+		case X509_V_ERR_CRL_HAS_EXPIRED:
+			chain.certs[depth].err = SSL_CERT_ERR_TOO_OLD;
+			break;
+
+		case X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT:
+			chain.certs[depth].err = SSL_CERT_ERR_SELF_SIGNED;
+			break;
+
+		case X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN:
+			chain.certs[depth].err = SSL_CERT_ERR_CHAIN_SELF_SIGNED;
+			break;
+
+		case X509_V_ERR_CERT_REVOKED:
+			chain.certs[depth].err = SSL_CERT_ERR_REVOKED;
+			break;
+
+		case X509_V_ERR_HOSTNAME_MISMATCH:
+			chain.certs[depth].err = SSL_CERT_ERR_HOSTNAME_MISMATCH;
+			break;
+
+		default:
+			chain.certs[depth].err = SSL_CERT_ERR_UNKNOWN;
+			break;
+		}
+
+		/*
+		 * get certificate in Distinguished Encoding Rules (DER) format.
+		 */
+		mem = BIO_new(BIO_s_mem());
+		i2d_X509_bio(mem, certs[depth].cert);
+		BIO_get_mem_ptr(mem, &buf[depth]);
+		(void) BIO_set_close(mem, BIO_NOCLOSE);
+		BIO_free(mem);
+
+		chain.certs[depth].der = (uint8_t *)buf[depth]->data;
+		chain.certs[depth].der_length = buf[depth]->length;
+	}
+
+	/* Now dup that chain into the cache */
+	cached_chain = fetch_curl_get_cached_chain(f);
+	if (cert_chain_dup_into(&chain, cached_chain) != NSERROR_OK) {
+		/* Something went wrong storing the chain, give up */
+		hashmap_remove(curl_fetch_ssl_hashmap, f->url);
+	}
+
+	/* release the openssl memory buffer */
+	for (depth = 0; depth < chain.depth; depth++) {
+		if (chain.certs[depth].err == SSL_CERT_ERR_CERT_MISSING) {
+			continue;
+		}
+		if (buf[depth] != NULL) {
+			BUF_MEM_free(buf[depth]);
+		}
+	}
+}
+
+/**
+ * OpenSSL Certificate verification callback
+ *
+ * Called for each certificate in a chain being verified. OpenSSL
+ * calls this in deepest first order from the certificate authority to
+ * the peer certificate at position 0.
+ *
+ * Each certificate is stored in the fetch context the first time it
+ * is presented. If an error is encountered it is only returned for
+ * the peer certificate at position 0 allowing the enumeration of the
+ * entire chain not stopping early at the depth of the erroring
+ * certificate.
+ *
+ * \param verify_ok 0 if the caller has already determined the chain
+ *                   has errors else 1
+ * \param x509_ctx certificate context being verified
+ * \return 1 to indicate verification should continue and 0 to indicate
+ *          verification should stop.
+ */
+static int
+fetch_curl_verify_callback(int verify_ok, X509_STORE_CTX *x509_ctx)
+{
+	int depth;
+	struct curl_fetch_info *fetch;
+
+	depth = X509_STORE_CTX_get_error_depth(x509_ctx);
+	fetch = X509_STORE_CTX_get_app_data(x509_ctx);
+
+	/* certificate chain is excessively deep so fail verification */
+	if (depth >= MAX_CERT_DEPTH) {
+		X509_STORE_CTX_set_error(x509_ctx,
+					 X509_V_ERR_CERT_CHAIN_TOO_LONG);
+		return 0;
+	}
+
+	/* record the max depth */
+	if (depth > fetch->cert_depth) {
+		fetch->cert_depth = depth;
+	}
+
+	/* save the certificate by incrementing the reference count and
+	 * keeping a pointer.
+	 */
+	if (!fetch->cert_data[depth].cert) {
+		fetch->cert_data[depth].cert = X509_STORE_CTX_get_current_cert(x509_ctx);
+		ns_X509_up_ref(fetch->cert_data[depth].cert);
+		fetch->cert_data[depth].err = X509_STORE_CTX_get_error(x509_ctx);
+	}
+
+	/* allow certificate chain to be completed */
+	if (depth > 0) {
+		verify_ok = 1;
+	} else {
+		/* search for deeper certificates in the chain with errors */
+		for (depth = fetch->cert_depth; depth > 0; depth--) {
+			if (fetch->cert_data[depth].err != 0) {
+				/* error in previous certificate so fail verification */
+				verify_ok = 0;
+				X509_STORE_CTX_set_error(x509_ctx, fetch->cert_data[depth].err);
+			}
+		}
+	}
+
+	return verify_ok;
+}
+
+
+/**
+ * OpenSSL certificate chain verification callback
+ *
+ * Verifies certificate chain by calling standard implementation after
+ * setting up context for the certificate callback.
+ *
+ * \param x509_ctx The certificate store to validate
+ * \param parm The fetch context.
+ * \return 1 to indicate verification success and 0 to indicate verification failure.
+ */
+static int fetch_curl_cert_verify_callback(X509_STORE_CTX *x509_ctx, void *parm)
+{
+	struct curl_fetch_info *f = (struct curl_fetch_info *) parm;
+	int ok;
+	X509_VERIFY_PARAM *vparam;
+
+	/* Configure the verification parameters to include hostname */
+	vparam = X509_STORE_CTX_get0_param(x509_ctx);
+	X509_VERIFY_PARAM_set_hostflags(vparam, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+
+	ok = X509_VERIFY_PARAM_set1_host(vparam,
+					 lwc_string_data(f->host),
+					 lwc_string_length(f->host));
+
+	/* Store fetch struct in context for verify callback */
+	if (ok) {
+		ok = X509_STORE_CTX_set_app_data(x509_ctx, parm);
+	}
+
+	/* verify the certificate chain using standard call */
+	if (ok) {
+		ok = X509_verify_cert(x509_ctx);
+	}
+
+	fetch_curl_store_certs_in_cache(f);
+
+	return ok;
+}
+
+
+/**
+ * cURL SSL setup callback
+ *
+ * \param curl_handle The curl handle to perform the ssl operation on.
+ * \param _sslctx The ssl context.
+ * \param parm The callback context.
+ * \return A curl result code.
+ */
+static CURLcode
+fetch_curl_sslctxfun(CURL *curl_handle, void *_sslctx, void *parm)
+{
+	struct curl_fetch_info *f = (struct curl_fetch_info *) parm;
+	SSL_CTX *sslctx = _sslctx;
+	long options = SSL_OP_ALL | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3;
+
+	/* set verify callback for each certificate in chain */
+	SSL_CTX_set_verify(sslctx, SSL_VERIFY_PEER, fetch_curl_verify_callback);
+
+	/* set callback used to verify certificate chain */
+	SSL_CTX_set_cert_verify_callback(sslctx,
+					 fetch_curl_cert_verify_callback,
+					 parm);
+
+	if (f->downgrade_tls) {
+		/* Disable TLS 1.1/1.2 if the server can't cope with them */
+#ifdef SSL_OP_NO_TLSv1_1
+		options |= SSL_OP_NO_TLSv1_1;
+#endif
+#ifdef SSL_OP_NO_TLSv1_2
+		options |= SSL_OP_NO_TLSv1_2;
+#endif
+#ifdef SSL_MODE_SEND_FALLBACK_SCSV
+		/* Ensure server rejects the connection if downgraded too far */
+		SSL_CTX_set_mode(sslctx, SSL_MODE_SEND_FALLBACK_SCSV);
+#endif
+		/* Disable TLS1.2 ciphersuites */
+		SSL_CTX_set_cipher_list(sslctx, CIPHER_LIST ":-TLSv1.2");
+	}
+
+	SSL_CTX_set_options(sslctx, options);
+
+#ifdef SSL_OP_NO_TICKET
+	SSL_CTX_clear_options(sslctx, SSL_OP_NO_TICKET);
+#endif
+
+	return CURLE_OK;
+}
+
+
+#endif /* WITH_OPENSSL */
+
+
+/**
+ * Report the certificate information in the fetch to the users
+ */
+static void
+fetch_curl_report_certs_upstream(struct curl_fetch_info *f)
+{
+	fetch_msg msg;
+	struct cert_chain *chain;
+
+	chain = hashmap_lookup(curl_fetch_ssl_hashmap, f->url);
+
+	if (chain != NULL) {
+		msg.type = FETCH_CERTS;
+		msg.data.chain = chain;
+
+		fetch_send_callback(&msg, f->fetch_handle);
+	}
+
+	f->sent_ssl_chain = true;
+}
+
+
 /**
  * Set options specific for a fetch.
  *
@@ -451,7 +913,7 @@ static CURLcode fetch_curl_set_options(struct curl_fetch_info *f)
 	}
 
 	if ((auth = urldb_get_auth_details(f->url, NULL)) != NULL) {
-		SETOPT(CURLOPT_HTTPAUTH, CURLAUTH_ANY);
+		SETOPT(CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
 		SETOPT(CURLOPT_USERPWD, auth);
 	} else {
 		SETOPT(CURLOPT_USERPWD, NULL);
@@ -494,10 +956,20 @@ static CURLcode fetch_curl_set_options(struct curl_fetch_info *f)
 		/* Disable certificate verification */
 		SETOPT(CURLOPT_SSL_VERIFYPEER, 0L);
 		SETOPT(CURLOPT_SSL_VERIFYHOST, 0L);
+		if (curl_with_openssl) {
+			SETOPT(CURLOPT_SSL_CTX_FUNCTION, NULL);
+			SETOPT(CURLOPT_SSL_CTX_DATA, NULL);
+		}
 	} else {
 		/* do verification */
 		SETOPT(CURLOPT_SSL_VERIFYPEER, 1L);
 		SETOPT(CURLOPT_SSL_VERIFYHOST, 2L);
+#ifdef WITH_OPENSSL
+		if (curl_with_openssl) {
+			SETOPT(CURLOPT_SSL_CTX_FUNCTION, fetch_curl_sslctxfun);
+			SETOPT(CURLOPT_SSL_CTX_DATA, f);
+		}
+#endif
 	}
 
 	return CURLE_OK;
@@ -622,23 +1094,6 @@ static void fetch_curl_cache_handle(CURL *handle, lwc_string *host)
 
 
 /**
- * Abort a fetch.
- */
-static void fetch_curl_abort(void *vf)
-{
-	struct curl_fetch_info *f = (struct curl_fetch_info *)vf;
-	assert(f);
-	NSLOG(netsurf, INFO, "fetch %p, url '%s'", f, nsurl_access(f->url));
-	if (f->curl_handle) {
-		f->abort = true;
-	} else {
-		fetch_remove_from_queues(f->fetch_handle);
-		fetch_free(f->fetch_handle);
-	}
-}
-
-
-/**
  * Clean up the provided fetch object and free it.
  *
  * Will prod the queue afterwards to allow pending requests to be initiated.
@@ -665,6 +1120,30 @@ static void fetch_curl_stop(struct curl_fetch_info *f)
 
 
 /**
+ * Abort a fetch.
+ */
+static void fetch_curl_abort(void *vf)
+{
+	struct curl_fetch_info *f = (struct curl_fetch_info *)vf;
+	assert(f);
+	NSLOG(netsurf, INFO, "fetch %p, url '%s'", f, nsurl_access(f->url));
+	if (f->curl_handle) {
+		if (inside_curl) {
+			NSLOG(netsurf, DEBUG, "Deferring cleanup");
+			f->abort = true;
+		} else {
+			NSLOG(netsurf, DEBUG, "Immediate abort");
+			fetch_curl_stop(f);
+			fetch_free(f->fetch_handle);
+		}
+	} else {
+		fetch_remove_from_queues(f->fetch_handle);
+		fetch_free(f->fetch_handle);
+	}
+}
+
+
+/**
  * Free a fetch structure and associated resources.
  */
 static void fetch_curl_free(void *vf)
@@ -686,6 +1165,13 @@ static void fetch_curl_free(void *vf)
 	free(f->post_urlenc);
 	if (f->post_multipart) {
 		curl_formfree(f->post_multipart);
+	}
+
+	/* free certificate data */
+	for (i = 0; i < MAX_CERT_DEPTH; i++) {
+		if (f->cert_data[i].cert != NULL) {
+			ns_X509_free(f->cert_data[i].cert);
+		}
 	}
 
 	free(f);
@@ -753,6 +1239,7 @@ static bool fetch_curl_process_headers(struct curl_fetch_info *f)
 	return false;
 }
 
+
 /**
  * Handle a completed fetch (CURLMSG_DONE from curl_multi_info_read()).
  *
@@ -763,6 +1250,7 @@ static void fetch_curl_done(CURL *curl_handle, CURLcode result)
 {
 	bool finished = false;
 	bool error = false;
+	bool cert = false;
 	bool abort_fetch;
 	struct curl_fetch_info *f;
 	char **_hideous_hack = (char **) (void *) &f;
@@ -809,6 +1297,13 @@ static void fetch_curl_done(CURL *curl_handle, CURLcode result)
 		 * returns 0, which we use to abort intentionally
 		 */
 		;
+	} else if (result == CURLE_SSL_PEER_CERTIFICATE ||
+		   result == CURLE_SSL_CACERT) {
+		/* Some kind of failure has occurred.  If we don't know
+		 * what happened, we'll have reported unknown errors up
+		 * to the user already via the certificate chain error fields.
+		 */
+		cert = true;
 	} else {
 		NSLOG(netsurf, INFO, "Unknown cURL response code %d", result);
 		error = true;
@@ -816,11 +1311,20 @@ static void fetch_curl_done(CURL *curl_handle, CURLcode result)
 
 	fetch_curl_stop(f);
 
+	if (f->sent_ssl_chain == false) {
+		fetch_curl_report_certs_upstream(f);
+	}
+
 	if (abort_fetch) {
 		; /* fetch was aborted: no callback */
 	} else if (finished) {
 		fetch_msg msg;
 		msg.type = FETCH_FINISHED;
+		fetch_send_callback(&msg, f->fetch_handle);
+	} else if (cert) {
+		/* user needs to validate certificate with issue */
+		fetch_msg msg;
+		msg.type = FETCH_CERT_ERR;
 		fetch_send_callback(&msg, f->fetch_handle);
 	} else if (error) {
 		fetch_msg msg;
@@ -897,12 +1401,13 @@ static void fetch_curl_poll(lwc_string *scheme_ignored)
 	}
 
 	/* do any possible work on the current fetches */
+	inside_curl = true;
 	do {
 		codem = curl_multi_perform(fetch_curl_multi, &running);
 		if (codem != CURLM_OK && codem != CURLM_CALL_MULTI_PERFORM) {
-			NSLOG(netsurf, WARNING, "curl_multi_perform: %i %s",
+			NSLOG(netsurf, WARNING,
+			      "curl_multi_perform: %i %s",
 			      codem, curl_multi_strerror(codem));
-			guit->misc->warning("MiscError", curl_multi_strerror(codem));
 			return;
 		}
 	} while (codem == CURLM_CALL_MULTI_PERFORM);
@@ -920,6 +1425,7 @@ static void fetch_curl_poll(lwc_string *scheme_ignored)
 		}
 		curl_msg = curl_multi_info_read(fetch_curl_multi, &queue);
 	}
+	inside_curl = false;
 }
 
 
@@ -1009,9 +1515,6 @@ static size_t fetch_curl_data(char *data, size_t size, size_t nmemb, void *_f)
 	CURLcode code;
 	fetch_msg msg;
 
-	assert(inside_curl == false);
-	inside_curl = true;
-
 	/* ensure we only have to get this information once */
 	if (!f->http_code) {
 		code = curl_easy_getinfo(f->curl_handle, CURLINFO_HTTP_CODE,
@@ -1025,13 +1528,11 @@ static size_t fetch_curl_data(char *data, size_t size, size_t nmemb, void *_f)
 	 */
 	if (f->http_code == 401) {
 		f->http_code = 0;
-		inside_curl = false;
 		return size * nmemb;
 	}
 
 	if (f->abort || (!f->had_headers && fetch_curl_process_headers(f))) {
 		f->stopped = true;
-		inside_curl = false;
 		return 0;
 	}
 
@@ -1041,7 +1542,6 @@ static size_t fetch_curl_data(char *data, size_t size, size_t nmemb, void *_f)
 	msg.data.header_or_data.len = size * nmemb;
 	fetch_send_callback(&msg, f->fetch_handle);
 
-	inside_curl = false;
 	if (f->abort) {
 		f->stopped = true;
 		return 0;
@@ -1067,6 +1567,10 @@ fetch_curl_header(char *data, size_t size, size_t nmemb, void *_f)
 	if (f->abort) {
 		f->stopped = true;
 		return 0;
+	}
+
+	if (f->sent_ssl_chain == false) {
+		fetch_curl_report_certs_upstream(f);
 	}
 
 	msg.type = FETCH_HEADER;
@@ -1172,6 +1676,18 @@ nserror fetch_curl_register(void)
 		.finalise = fetch_curl_finalise
 	};
 
+#if LIBCURL_VERSION_NUM >= 0x073800
+	/* version 7.56.0 can select which SSL backend to use */
+	CURLsslset setres;
+
+	setres = curl_global_sslset(CURLSSLBACKEND_OPENSSL, NULL, NULL);
+	if (setres == CURLSSLSET_OK) {
+		curl_with_openssl = true;
+	} else {
+		curl_with_openssl = false;
+	}
+#endif
+
 	NSLOG(netsurf, INFO, "curl_version %s", curl_version());
 
 	code = curl_global_init(CURL_GLOBAL_ALL);
@@ -1241,7 +1757,6 @@ nserror fetch_curl_register(void)
 	SETOPT(CURLOPT_LOW_SPEED_TIME, 180L);
 	SETOPT(CURLOPT_NOSIGNAL, 1L);
 	SETOPT(CURLOPT_CONNECTTIMEOUT, nsoption_uint(curl_fetch_timeout));
-	SETOPT(CURLOPT_SSL_CIPHER_LIST, CIPHER_LIST);
 
 	if (nsoption_charp(ca_bundle) &&
 	    strcmp(nsoption_charp(ca_bundle), "")) {
@@ -1254,9 +1769,38 @@ nserror fetch_curl_register(void)
 		SETOPT(CURLOPT_CAPATH, nsoption_charp(ca_path));
 	}
 
+#if LIBCURL_VERSION_NUM < 0x073800
+	/*
+	 * before 7.56.0 Detect openssl from whether the SSL CTX
+	 *  function API works
+	 */
+	code = curl_easy_setopt(fetch_blank_curl, CURLOPT_SSL_CTX_FUNCTION, NULL);
+	if (code != CURLE_OK) {
+		curl_with_openssl = false;
+	} else {
+		curl_with_openssl = true;
+	}
+#endif
+
+	if (curl_with_openssl) {
+		/* only set the cipher list with openssl otherwise the
+		 *  fetch fails with "Unknown cipher in list"
+		 */
+		SETOPT(CURLOPT_SSL_CIPHER_LIST, CIPHER_LIST);
+	}
+
+	NSLOG(netsurf, INFO, "cURL %slinked against openssl",
+	      curl_with_openssl ? "" : "not ");
+
 	/* cURL initialised okay, register the fetchers */
 
 	data = curl_version_info(CURLVERSION_NOW);
+
+	curl_fetch_ssl_hashmap = hashmap_create(&curl_fetch_ssl_hashmap_parameters);
+	if (curl_fetch_ssl_hashmap == NULL) {
+		NSLOG(netsurf, CRITICAL, "Unable to initialise SSL certificate hashmap");
+		return NSERROR_NOMEM;
+	}
 
 	for (i = 0; data->protocols[i]; i++) {
 		if (strcmp(data->protocols[i], "http") == 0) {

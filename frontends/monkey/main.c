@@ -23,6 +23,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <string.h>
+#include <errno.h>
+#include <signal.h>
 
 #include "utils/config.h"
 #include "utils/sys_time.h"
@@ -36,11 +38,11 @@
 #include "netsurf/url_db.h"
 #include "netsurf/cookie_db.h"
 #include "content/fetch.h"
+#include "content/backing_store.h"
 
 #include "monkey/output.h"
 #include "monkey/dispatch.h"
 #include "monkey/browser.h"
-#include "monkey/cert.h"
 #include "monkey/401login.h"
 #include "monkey/filetype.h"
 #include "monkey/fetch.h"
@@ -204,6 +206,16 @@ static nserror gui_launch_url(struct nsurl *url)
 	return NSERROR_OK;
 }
 
+static nserror gui_present_cookies(const char *search_term)
+{
+	if (search_term != NULL) {
+		moutf(MOUT_GENERIC, "PRESENT_COOKIES %s", search_term);
+	} else {
+		moutf(MOUT_GENERIC, "PRESENT_COOKIES");
+	}
+	return NSERROR_OK;
+}
+
 static void quit_handler(int argc, char **argv)
 {
 	monkey_done = true;
@@ -244,12 +256,11 @@ static bool nslog_stream_configure(FILE *fptr)
 
 static struct gui_misc_table monkey_misc_table = {
 	.schedule = monkey_schedule,
-	.warning = monkey_warn_user,
 
 	.quit = monkey_quit,
 	.launch_url = gui_launch_url,
-	.cert_verify = gui_cert_verify,
 	.login = gui_401login_open,
+	.present_cookies = gui_present_cookies,
 };
 
 static void monkey_run(void)
@@ -263,6 +274,9 @@ static void monkey_run(void)
 
 	while (!monkey_done) {
 
+		/* discover the next scheduled event time */
+		schedtm = monkey_schedule_run();
+
 		/* clears fdset */
 		fetch_fdset(&read_fd_set, &write_fd_set, &exc_fd_set, &max_fd);
 
@@ -272,9 +286,6 @@ static void monkey_run(void)
 		}
 		FD_SET(0, &read_fd_set);
 		FD_SET(0, &exc_fd_set);
-
-		/* discover the next scheduled event time */
-		schedtm = monkey_schedule_run();
 
 		/* setup timeout */
 		switch (schedtm) {
@@ -306,6 +317,7 @@ static void monkey_run(void)
 				&exc_fd_set,
 				timeout);
 		if (rdy_fd < 0) {
+			NSLOG(netsurf, CRITICAL, "Unable to select: %s", strerror(errno));
 			monkey_done = true;
 		} else if (rdy_fd > 0) {
 			if (FD_ISSET(0, &read_fd_set)) {
@@ -314,6 +326,53 @@ static void monkey_run(void)
 		}
 	}
 }
+
+#if (!defined(NDEBUG) && defined(HAVE_EXECINFO))
+#include <execinfo.h>
+static void *backtrace_buffer[4096];
+
+void
+__assert_fail(const char *__assertion, const char *__file,
+	      unsigned int __line, const char *__function)
+{
+	int frames;
+	fprintf(stderr,
+		"MONKEY: Assertion failure!\n"
+		"%s:%d: %s: Assertion `%s` failed.\n",
+		__file, __line, __function, __assertion);
+
+	frames = backtrace(&backtrace_buffer[0], 4096);
+	if (frames > 0 && frames < 4096) {
+		fprintf(stderr, "Backtrace:\n");
+		fflush(stderr);
+		backtrace_symbols_fd(&backtrace_buffer[0], frames, 2);
+	}
+
+        abort();
+}
+
+static void
+signal_handler(int sig)
+{
+	int frames;
+	fprintf(stderr, "Caught signal %s (%d)\n",
+		((sig == SIGSEGV) ? "SIGSEGV" :
+		 ((sig == SIGILL) ? "SIGILL" :
+		  ((sig == SIGFPE) ? "SIGFPE" :
+		   ((sig == SIGBUS) ? "SIGBUS" :
+		    "unknown signal")))),
+		sig);
+	frames = backtrace(&backtrace_buffer[0], 4096);
+	if (frames > 0 && frames < 4096) {
+		fprintf(stderr, "Backtrace:\n");
+		fflush(stderr);
+		backtrace_symbols_fd(&backtrace_buffer[0], frames, 2);
+	}
+
+        abort();
+}
+
+#endif
 
 int
 main(int argc, char **argv)
@@ -329,7 +388,17 @@ main(int argc, char **argv)
 		.fetch = monkey_fetch_table,
 		.bitmap = monkey_bitmap_table,
 		.layout = monkey_layout_table,
+                .llcache = filesystem_llcache_table,
 	};
+
+#if (!defined(NDEBUG) && defined(HAVE_EXECINFO))
+	/* Catch segfault, illegal instructions and fp exceptions */
+	signal(SIGSEGV, signal_handler);
+	signal(SIGILL, signal_handler);
+	signal(SIGFPE, signal_handler);
+	/* It's unlikely, but SIGBUS could happen on some platforms */
+	signal(SIGBUS, signal_handler);
+#endif
 
 	ret = netsurf_register(&monkey_table);
 	if (ret != NSERROR_OK) {
@@ -378,6 +447,12 @@ main(int argc, char **argv)
 	urldb_load(nsoption_charp(url_file));
 	urldb_load_cookies(nsoption_charp(cookie_file));
 
+	/* Free resource paths now we're done finding resources */
+	for (char **s = respaths; *s != NULL; s++) {
+		free(*s);
+	}
+	free(respaths);
+
 	ret = monkey_register_handler("QUIT", quit_handler);
 	if (ret != NSERROR_OK) {
 		die("quit handler failed to register");
@@ -398,11 +473,6 @@ main(int argc, char **argv)
 		die("login handler failed to register");
 	}
 
-	ret = monkey_register_handler("SSLCERT", monkey_sslcert_handle_command);
-	if (ret != NSERROR_OK) {
-		die("sslcert handler failed to register");
-	}
-	
 
 	moutf(MOUT_GENERIC, "STARTED");
 	monkey_run();
@@ -418,6 +488,9 @@ main(int argc, char **argv)
 
 	/* finalise logging */
 	nslog_finalise();
+
+	/* And free any monkey-specific bits */
+	monkey_free_handlers();
 
 	return 0;
 }
