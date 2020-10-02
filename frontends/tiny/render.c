@@ -150,7 +150,8 @@ newface(const char *file, const char *font)
 	if (!face)
 		goto err0;
 	if (!file) {
-		filepath_sfind(respaths, buf, font);
+		if (!filepath_sfind(respaths, buf, font))
+			goto err1;
 		file = buf;
 	}
 	face->file = strdup(file);
@@ -1221,8 +1222,10 @@ render_init(void)
 		goto err4;
 
 	face = newface(nsoption_charp(tiny_face_sans_serif), TINY_FONT_SANS_SERIF);
-	if (!face)
+	if (!face) {
+		err = NSERROR_INIT_FAILED;
 		goto err4;
+	}
 	faces[FACE_SANS_SERIF] = face;
 
 	face = newface(nsoption_charp(tiny_face_sans_serif_bold), TINY_FONT_SANS_SERIF_BOLD);
