@@ -643,6 +643,7 @@ redraw(void *data)
 	p->frame = wl_surface_frame(p->surface);
 	if (p->frame)
 		wl_callback_add_listener(p->frame, &frame_listener, p);
+	wl_surface_attach(p->surface, p->image->buffer, 0, 0);
 	wl_surface_commit(p->surface);
 	pixman_region32_clear(&p->damage);
 }
@@ -933,6 +934,7 @@ platform_window_create(struct gui_window *g)
 	if (!p->toplevel)
 		goto err3;
 	xdg_toplevel_add_listener(p->toplevel, &toplevel_listener, p);
+	wl_surface_commit(p->surface);
 
 	wl_display_roundtrip(wl->display);
 
