@@ -27,8 +27,7 @@ extern const struct plotter_table *tiny_plotter_table;
 
 nserror render_init(void);
 void render_finalize(void);
-void render_settarget(pixman_image_t *image);
 
-nserror ploticon(struct bitmap *bitmap, int x, int y, bool active);
+nserror plot_icon(const struct redraw_context *ctx, struct bitmap *bitmap, int x, int y, bool active);
 
 #endif

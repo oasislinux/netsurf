@@ -90,7 +90,6 @@ static FTC_Manager manager;
 static FTC_CMapCache cmapcache;
 static struct faceid *faces[FACE_COUNT];
 static pixman_glyph_cache_t *glyphcache;
-static pixman_image_t *target;
 static pixman_image_t *iconmask;
 static struct rect curclip;
 
@@ -568,7 +567,7 @@ bitmap_modified(void *bitmap)
 static nserror
 bitmap_render(struct bitmap *bitmap, struct hlcache_handle *content)
 {
-	pixman_image_t *image = (void *)bitmap;
+	pixman_image_t *target, *image = (void *)bitmap;
 	struct redraw_context ctx = {
 		.interactive = false,
 		.background_images = true,
@@ -585,7 +584,8 @@ bitmap_render(struct bitmap *bitmap, struct hlcache_handle *content)
 	target = pixman_image_create_bits_no_clear(pixman_image_get_format(image), cw, ch, NULL, 0);
 	if (!target)
 		return NSERROR_NOMEM;
-	content_scaled_redraw(content, pixman_image_get_width(target), pixman_image_get_height(target), &ctx);
+	ctx.priv = target;
+	content_scaled_redraw(content, cw, ch, &ctx);
 	pixman_transform_init_scale(&transform, pixman_int_to_fixed(cw) / dw, pixman_int_to_fixed(ch) / dh);
 	pixman_image_set_transform(image, &transform);
 	pixman_image_set_filter(image, PIXMAN_FILTER_GOOD, NULL, 0);
@@ -613,10 +613,10 @@ struct gui_bitmap_table *tiny_bitmap_table = &bitmap_table;
 
 /* plotters */
 static nserror
-plotoutline(FT_Outline *outline, colour c)
+plot_outline(const struct redraw_context *ctx, FT_Outline *outline, colour c)
 {
 	pixman_color_t color = PIXMAN_COLOR(c);
-	pixman_image_t *image, *solid;
+	pixman_image_t *target = ctx->priv, *image, *solid;
 	int x, y, w, h;
 	nserror err = NSERROR_OK;
 
@@ -641,9 +641,9 @@ err0:
 }
 
 nserror
-ploticon(struct bitmap *bitmap, int x, int y, bool active)
+plot_icon(const struct redraw_context *ctx, struct bitmap *bitmap, int x, int y, bool active)
 {
-	pixman_image_t *image = (void *)bitmap;
+	pixman_image_t *target = ctx->priv, *image = (void *)bitmap;
 	int w, h;
 
 	w = pixman_image_get_width(image);
@@ -657,6 +657,7 @@ ploticon(struct bitmap *bitmap, int x, int y, bool active)
 static nserror
 plot_clip(const struct redraw_context *ctx, const struct rect *clip)
 {
+	pixman_image_t *target = ctx->priv;
 	pixman_region32_t region;
 	pixman_box32_t box;
 	bool success;
@@ -680,6 +681,7 @@ plot_clip(const struct redraw_context *ctx, const struct rect *clip)
 static nserror
 plot_arc(const struct redraw_context *ctx, const plot_style_t *style, int x, int y, int r, int angle1, int angle2)
 {
+	pixman_image_t *target = ctx->priv;
 	nserror err;
 	FT_Stroker stroker = NULL;
 	FT_Outline outline;
@@ -745,7 +747,7 @@ plot_arc(const struct redraw_context *ctx, const plot_style_t *style, int x, int
 	FT_Stroker_Export(stroker, &outline);
 	FT_Outline_Translate(&outline, x, -y);
 
-	err = plotoutline(&outline, style->fill_colour);
+	err = plot_outline(ctx, &outline, style->fill_colour);
 err:
 	FT_Stroker_Done(stroker);
 	free(outline.points);
@@ -788,12 +790,13 @@ plot_disc(const struct redraw_context *ctx, const plot_style_t *style, int x, in
 	outline.tags = tags;
 	outline.flags = FT_OUTLINE_OWNER;
 
-	return plotoutline(&outline, style->fill_colour);
+	return plot_outline(ctx, &outline, style->fill_colour);
 }
 
 static nserror
 plot_line(const struct redraw_context *ctx, const plot_style_t *style, const struct rect *r)
 {
+	pixman_image_t *target = ctx->priv;
 	int x0, y0, x1, y1, sw;
 
 	x0 = r->x0;
@@ -862,13 +865,14 @@ plot_line(const struct redraw_context *ctx, const plot_style_t *style, const str
 			.flags = FT_OUTLINE_OWNER,
 		};
 
-		return plotoutline(&outline, style->stroke_colour);
+		return plot_outline(ctx, &outline, style->stroke_colour);
 	}
 }
 
 static nserror
 plot_rectangle(const struct redraw_context *ctx, const plot_style_t *style, const struct rect *r)
 {
+	pixman_image_t *target = ctx->priv;
 	pixman_color_t fill_color = PIXMAN_COLOR(style->fill_colour);
 	pixman_box32_t box = {
 		min(r->x0, r->x1), min(r->y0, r->y1),
@@ -912,7 +916,7 @@ plot_polygon(const struct redraw_context *ctx, const plot_style_t *style, const 
 		v->y = -p[1] << 6;
 	}
 
-	err = plotoutline(&outline, style->fill_colour);
+	err = plot_outline(ctx, &outline, style->fill_colour);
 
 	free(outline.tags);
 err1:
@@ -981,7 +985,7 @@ plot_path(const struct redraw_context *ctx, const plot_style_t *style, const flo
 			FT_Outline_Transform(&outline, &mat);
 		if (t.x || t.y)
 			FT_Outline_Translate(&outline, t.x, t.y);
-		err = plotoutline(&outline, style->fill_colour);
+		err = plot_outline(ctx, &outline, style->fill_colour);
 		if (err != NSERROR_OK)
 			goto err;
 	}
@@ -1075,7 +1079,7 @@ plot_path(const struct redraw_context *ctx, const plot_style_t *style, const flo
 			FT_Outline_Transform(&outline, &mat);
 		if (t.x || t.y)
 			FT_Outline_Translate(&outline, t.x, t.y);
-		err = plotoutline(&outline, style->stroke_colour);
+		err = plot_outline(ctx, &outline, style->stroke_colour);
 		if (err != NSERROR_OK)
 			goto err;
 	}
@@ -1093,7 +1097,7 @@ static nserror
 plot_bitmap(const struct redraw_context *ctx, struct bitmap *bitmap, int x, int y, int w, int h, colour bg, bitmap_flags_t flags)
 {
 	struct pixman_transform transform;
-	pixman_image_t *image = (void *)bitmap;
+	pixman_image_t *target = ctx->priv, *image = (void *)bitmap;
 	pixman_fixed_t sx, sy;
 	int srcx = 0, srcy = 0;
 
@@ -1141,7 +1145,7 @@ plot_text(const struct redraw_context *ctx, const struct plot_font_style *style,
 	int dx = 0, dy = 0;
 	pixman_glyph_t *glyphs;
 	size_t nglyphs;
-	pixman_image_t *solid;
+	pixman_image_t *target = ctx->priv, *solid;
 	const void *entry;
 	pixman_color_t color = PIXMAN_COLOR(style->foreground);
 	nserror err;
@@ -1276,10 +1280,3 @@ render_finalize(void)
 	FT_Done_FreeType(library);
 	pixman_glyph_cache_destroy(glyphcache);
 }
-
-void
-render_settarget(pixman_image_t *image)
-{
-	target = image;
-}
-

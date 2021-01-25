@@ -618,6 +618,7 @@ redraw(void *data)
 		.interactive = true,
 		.background_images = true,
 		.plot = tiny_plotter_table,
+		.priv = p->image->pixman,
 	};
 	struct rect clip;
 	pixman_box32_t *b;
@@ -636,7 +637,6 @@ redraw(void *data)
 	clip.x1 = p->damage.extents.x2;
 	clip.y1 = p->damage.extents.y2;
 	pixman_image_set_clip_region32(p->image->pixman, &p->damage);
-	render_settarget(p->image->pixman);
 
 	gui_window_redraw(p->g, &clip, &ctx);
 

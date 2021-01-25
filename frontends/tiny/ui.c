@@ -349,22 +349,22 @@ buttons_redraw(struct gui_window *g, struct element *e, struct rect *clip, const
 	bool back, forward;
 	int x, y;
 
-	ctx->plot->clip(NULL, clip);
-	ctx->plot->rectangle(NULL, &style, &e->r);
+	ctx->plot->clip(ctx, clip);
+	ctx->plot->rectangle(ctx, &style, &e->r);
 	back = browser_window_history_back_available(g->bw);
 	forward = browser_window_history_forward_available(g->bw);
 
 	x = e->r.x0;
 	y = e->r.y0 + (TOOLBAR_HEIGHT - ICON_SIZE) / 2;
-	ploticon(tiny_icons[ICON_BACK], x, y, back);
+	plot_icon(ctx, tiny_icons[ICON_BACK], x, y, back);
 	x += ICON_SIZE;
-	ploticon(tiny_icons[ICON_FORWARD], x, y, forward);
+	plot_icon(ctx, tiny_icons[ICON_FORWARD], x, y, forward);
 	x += ICON_SIZE;
-	ploticon(tiny_icons[g->throbbing ? ICON_STOP : ICON_HOME], x, y, true);
+	plot_icon(ctx, tiny_icons[g->throbbing ? ICON_STOP : ICON_HOME], x, y, true);
 	x += ICON_SIZE;
-	ploticon(tiny_icons[ICON_RELOAD], x, y, true);
+	plot_icon(ctx, tiny_icons[ICON_RELOAD], x, y, true);
 
-	ctx->plot->line(NULL, &style, &(struct rect){e->r.x0, e->r.y1 - 1, e->r.x1, e->r.y1 - 1});
+	ctx->plot->line(ctx, &style, &(struct rect){e->r.x0, e->r.y1 - 1, e->r.x1, e->r.y1 - 1});
 }
 
 static void
@@ -559,7 +559,7 @@ scroll_redraw(struct gui_window *g, struct element *e, struct rect *clip, const 
 	s = findscrollbar(g, e);
 	if (!s)
 		return;
-	ctx->plot->clip(NULL, clip);  // TODO: scrollbar should probably do this
+	ctx->plot->clip(ctx, clip);  // TODO: scrollbar should probably do this
 	scrollbar_redraw(s, e->r.x0, e->r.y0, clip, 1, ctx);
 }
 
@@ -608,10 +608,10 @@ status_redraw(struct gui_window *g, struct element *e, struct rect *clip, const 
 		.stroke_width = plot_style_int_to_fixed(1),
 	};
 
-	ctx->plot->clip(NULL, clip);
-	ctx->plot->rectangle(NULL, &style, &e->r);
-	ctx->plot->text(NULL, &fontstyle, e->r.x0 + 2, e->r.y1 - 4, g->status, strlen(g->status));
-	ctx->plot->line(NULL, &style, &(struct rect){e->r.x0, e->r.y0, e->r.x1, e->r.y0});
+	ctx->plot->clip(ctx, clip);
+	ctx->plot->rectangle(ctx, &style, &e->r);
+	ctx->plot->text(ctx, &fontstyle, e->r.x0 + 2, e->r.y1 - 4, g->status, strlen(g->status));
+	ctx->plot->line(ctx, &style, &(struct rect){e->r.x0, e->r.y0, e->r.x1, e->r.y0});
 }
 
 static const struct elementimpl statusimpl = {
@@ -680,12 +680,12 @@ searchbuttons_redraw(struct gui_window *g, struct element *e, struct rect *clip,
 		.stroke_width = plot_style_int_to_fixed(1),
 	};
 
-	ctx->plot->clip(NULL, clip);
-	ctx->plot->rectangle(NULL, &style, &e->r);
-	ctx->plot->line(NULL, &style, &(struct rect){e->r.x0, e->r.y1 - 1, e->r.x1, e->r.y1 - 1});
-	ctx->plot->line(NULL, &style, &(struct rect){e->r.x0, e->r.y0, e->r.x1, e->r.y0});
-	ploticon(tiny_icons[ICON_UP], e->r.x0, e->r.y0, g->search.found && g->search.prev);
-	ploticon(tiny_icons[ICON_DOWN], e->r.x0 + ICON_SIZE, e->r.y0, g->search.found && g->search.next);
+	ctx->plot->clip(ctx, clip);
+	ctx->plot->rectangle(ctx, &style, &e->r);
+	ctx->plot->line(ctx, &style, &(struct rect){e->r.x0, e->r.y1 - 1, e->r.x1, e->r.y1 - 1});
+	ctx->plot->line(ctx, &style, &(struct rect){e->r.x0, e->r.y0, e->r.x1, e->r.y0});
+	plot_icon(ctx, tiny_icons[ICON_UP], e->r.x0, e->r.y0, g->search.found && g->search.prev);
+	plot_icon(ctx, tiny_icons[ICON_DOWN], e->r.x0 + ICON_SIZE, e->r.y0, g->search.found && g->search.next);
 }
 
 static void
@@ -1091,8 +1091,8 @@ gui_window_redraw(struct gui_window *g, const struct rect *clip, const struct re
 		style.stroke_type = PLOT_OP_TYPE_SOLID;
 		style.stroke_width = plot_style_int_to_fixed(1);
 		style.stroke_colour = CARET_STROKE;
-		ctx->plot->clip(NULL, NULL);
-		ctx->plot->line(NULL, &style, &(struct rect){g->caret.x, g->caret.y, g->caret.x, g->caret.y + g->caret.h});
+		ctx->plot->clip(ctx, NULL);
+		ctx->plot->line(ctx, &style, &(struct rect){g->caret.x, g->caret.y, g->caret.x, g->caret.y + g->caret.h});
 	}
 
 }
