@@ -1402,8 +1402,8 @@ gui_window_axis(struct gui_window *g, bool vert, int amount)
 	if (browser_window_scroll_at_point(g->bw, x, y, dx, dy))
 		return;
 
-	if (!se->hidden && scrollbar_scroll(s, amount))
-		platform_window_update(g->platform, &g->ui[vert ? UI_VSCROLL : UI_HSCROLL].r);
+	if (!se->hidden)
+		scrollbar_scroll(s, amount);
 }
 
 /**** gui_search implementation ****/
