@@ -911,7 +911,7 @@ window_update_extent(struct gui_window *g)
 
 	if (reformat) {
 		e = &g->ui[UI_CONTENT];
-		browser_window_reformat(g->bw, false, rectwidth(&e->r), rectheight(&e->r));
+		browser_window_schedule_reformat(g->bw);
 	}
 }
 
