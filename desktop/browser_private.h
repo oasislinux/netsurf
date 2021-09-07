@@ -245,6 +245,12 @@ struct browser_window {
 	struct browser_window *children;
 	struct browser_window *parent;
 
+	/** [cols * rows] widths */
+	int *widths;
+
+	/** [cols * rows] heights */
+	int *heights;
+
 	/** [iframe_count] iframes */
 	int iframe_count;
 	struct browser_window *iframes;

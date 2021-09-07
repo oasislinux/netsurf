@@ -313,6 +313,22 @@ nserror browser_window_create_frameset(struct browser_window *bw,
 		return NSERROR_NOMEM;
 	}
 
+	bw->widths = calloc((frameset->cols * frameset->rows), sizeof(*bw->widths));
+	if (!bw->widths) {
+		free(bw->children);
+		bw->children = NULL;
+		return NSERROR_NOMEM;
+	}
+
+	bw->heights = calloc((frameset->cols * frameset->rows), sizeof(*bw->heights));
+	if (!bw->heights) {
+		free(bw->children);
+		bw->children = NULL;
+		free(bw->widths);
+		bw->widths = NULL;
+		return NSERROR_NOMEM;
+	}
+
 	bw->cols = frameset->cols;
 	bw->rows = frameset->rows;
 	for (row = 0; row < bw->rows; row++) {
@@ -345,6 +361,10 @@ nserror browser_window_create_frameset(struct browser_window *bw,
 				if (!window->name) {
 					free(bw->children);
 					bw->children = NULL;
+					free(bw->widths);
+					bw->widths = NULL;
+					free(bw->heights);
+					bw->heights = NULL;
 					return NSERROR_NOMEM;
 				}
 			}
@@ -422,8 +442,7 @@ nserror browser_window_create_frameset(struct browser_window *bw,
 
 void browser_window_recalculate_frameset(struct browser_window *bw)
 {
-	int widths[bw->cols][bw->rows];
-	int heights[bw->cols][bw->rows];
+	int *width, *height;
 	int bw_width, bw_height;
 	int avail_width, avail_height;
 	int row, row2, col, index;
@@ -458,24 +477,25 @@ void browser_window_recalculate_frameset(struct browser_window *bw)
 		for (col = 0; col < bw->cols; col++) {
 			index = (row * bw->cols) + col;
 			window = &bw->children[index];
+			width = &bw->widths[index];
 
 			switch (window->frame_width.unit) {
 			case FRAME_DIMENSION_PIXELS:
-				widths[col][row] = window->frame_width.value *
+				*width = window->frame_width.value *
 						window->scale;
 				if (window->border) {
 					if (col != 0)
-						widths[col][row] += 1;
+						*width += 1;
 					if (col != bw->cols - 1)
-						widths[col][row] += 1;
+						*width += 1;
 				}
 				break;
 			case FRAME_DIMENSION_PERCENT:
-				widths[col][row] = bw_width *
+				*width = bw_width *
 						window->frame_width.value / 100;
 				break;
 			case FRAME_DIMENSION_RELATIVE:
-				widths[col][row] = 0;
+				*width = 0;
 				relative += window->frame_width.value;
 				break;
 			default:
@@ -488,7 +508,7 @@ void browser_window_recalculate_frameset(struct browser_window *bw)
 						FRAME_DIMENSION_RELATIVE);
 				break;
 			}
-			avail_width -= widths[col][row];
+			avail_width -= *width;
 		}
 
 		/* Redistribute to fit window */
@@ -497,6 +517,7 @@ void browser_window_recalculate_frameset(struct browser_window *bw)
 			for (col = 0; col < bw->cols; col++) {
 				index = (row * bw->cols) + col;
 				window = &bw->children[index];
+				width = &bw->widths[index];
 
 				if (window->frame_width.unit ==
 						FRAME_DIMENSION_RELATIVE) {
@@ -505,7 +526,7 @@ void browser_window_recalculate_frameset(struct browser_window *bw)
 							relative;
 					avail_width -= size;
 					relative -= window->frame_width.value;
-					widths[col][row] += size;
+					*width += size;
 				}
 			}
 		} else if (bw_width != avail_width) {
@@ -513,18 +534,21 @@ void browser_window_recalculate_frameset(struct browser_window *bw)
 			extent = avail_width;
 			applied = 0;
 			for (col = 0; col < bw->cols; col++) {
+				index = (row * bw->cols) + col;
+				width = &bw->widths[index];
+
 				if (col == bw->cols - 1) {
 					/* Last cell, use up remainder */
-					widths[col][row] += extent - applied;
-					widths[col][row] =
-							widths[col][row] < 0 ?
-							0 : widths[col][row];
+					*width += extent - applied;
+					*width =
+							*width < 0 ?
+							0 : *width;
 				} else {
 					/* Find size of cell adjustment */
-					size = (widths[col][row] * extent) /
+					size = (*width * extent) /
 							(bw_width - extent);
 					/* Modify cell */
-					widths[col][row] += size;
+					*width += size;
 					applied += size;
 				}
 			}
@@ -538,24 +562,25 @@ void browser_window_recalculate_frameset(struct browser_window *bw)
 		for (row = 0; row < bw->rows; row++) {
 			index = (row * bw->cols) + col;
 			window = &bw->children[index];
+			height = &bw->heights[index];
 
 			switch (window->frame_height.unit) {
 			case FRAME_DIMENSION_PIXELS:
-				heights[col][row] = window->frame_height.value *
+				*height = window->frame_height.value *
 						window->scale;
 				if (window->border) {
 					if (row != 0)
-						heights[col][row] += 1;
+						*height += 1;
 					if (row != bw->rows - 1)
-						heights[col][row] += 1;
+						*height += 1;
 				}
 				break;
 			case FRAME_DIMENSION_PERCENT:
-				heights[col][row] = bw_height *
+				*height = bw_height *
 						window->frame_height.value / 100;
 				break;
 			case FRAME_DIMENSION_RELATIVE:
-				heights[col][row] = 0;
+				*height = 0;
 				relative += window->frame_height.value;
 				break;
 			default:
@@ -568,7 +593,7 @@ void browser_window_recalculate_frameset(struct browser_window *bw)
 						FRAME_DIMENSION_RELATIVE);
 				break;
 			}
-			avail_height -= heights[col][row];
+			avail_height -= *height;
 		}
 
 		if (avail_height == 0)
@@ -580,6 +605,7 @@ void browser_window_recalculate_frameset(struct browser_window *bw)
 			for (row = 0; row < bw->rows; row++) {
 				index = (row * bw->cols) + col;
 				window = &bw->children[index];
+				height = &bw->heights[index];
 
 				if (window->frame_height.unit ==
 						FRAME_DIMENSION_RELATIVE) {
@@ -588,7 +614,7 @@ void browser_window_recalculate_frameset(struct browser_window *bw)
 							relative;
 					avail_height -= size;
 					relative -= window->frame_height.value;
-					heights[col][row] += size;
+					*height += size;
 				}
 			}
 		} else if (bw_height != avail_height) {
@@ -596,18 +622,21 @@ void browser_window_recalculate_frameset(struct browser_window *bw)
 			extent = avail_height;
 			applied = 0;
 			for (row = 0; row < bw->rows; row++) {
+				index = (row * bw->cols) + col;
+				height = &bw->heights[index];
+
 				if (row == bw->rows - 1) {
 					/* Last cell, use up remainder */
-					heights[col][row] += extent - applied;
-					heights[col][row] =
-							heights[col][row] < 0 ?
-							0 : heights[col][row];
+					*height += extent - applied;
+					*height =
+							*height < 0 ?
+							0 : *height;
 				} else {
 					/* Find size of cell adjustment */
-					size = (heights[col][row] * extent) /
+					size = (*height * extent) /
 							(bw_height - extent);
 					/* Modify cell */
-					heights[col][row] += size;
+					*height += size;
 					applied += size;
 				}
 			}
@@ -620,16 +649,18 @@ void browser_window_recalculate_frameset(struct browser_window *bw)
 		for (col = 0; col < bw->cols; col++) {
 			index = (row * bw->cols) + col;
 			window = &bw->children[index];
+			width = &bw->widths[index];
+			height = &bw->heights[index];
 
 			y = 0;
 			for (row2 = 0; row2 < row; row2++)
-				y+= heights[col][row2];
+				y+= bw->widths[row2 * bw->cols + col];
 
 			window->x = x;
 			window->y = y;
 
-			new_width = widths[col][row] - 1;
-			new_height = heights[col][row] - 1;
+			new_width = *width - 1;
+			new_height = *height - 1;
 
 			if (window->width != new_width ||
 					window->height != new_height) {
@@ -643,7 +674,7 @@ void browser_window_recalculate_frameset(struct browser_window *bw)
 				browser_window_handle_scrollbars(window);
 			}
 
-			x += widths[col][row];
+			x += *width;
 
 			if (window->children)
 				browser_window_recalculate_frameset(window);
