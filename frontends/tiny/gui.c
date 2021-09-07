@@ -107,7 +107,7 @@ initrespaths(void)
 
 	xdgconfighome = getenv("XDG_CONFIG_HOME");
 	if (xdgconfighome) {
-		err = netsurf_mkpath(&confighome, &len, 4, xdgconfighome, "netsurf", "/");
+		err = netsurf_mkpath(&confighome, &len, 3, xdgconfighome, "netsurf", "/");
 	} else {
 		home = getenv("HOME");
 		if (!home)
