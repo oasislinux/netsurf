@@ -197,6 +197,7 @@ selectionwrite(struct epoll_event *ev)
 {
 	struct selectionwriter *w;
 	ssize_t n;
+	int ret;
 
 	w = ev->data.ptr;
 	n = write(w->fd, w->data->buf + w->pos, w->data->len - w->pos);
@@ -204,9 +205,13 @@ selectionwrite(struct epoll_event *ev)
 		w->pos += n;
 	if (n == 0 && w->pos < w->data->len)
 		return;
+	/* explicitly delete, the peer might have a copy of the fd */
+	ret = epoll_ctl(wl->epoll, EPOLL_CTL_DEL, w->fd, NULL);
 	close(w->fd);
+	w->fd = -1;
 	selectionunref(w->data);
-	free(w);
+	if (ret == 0)
+		free(w);
 }
 
 static void
